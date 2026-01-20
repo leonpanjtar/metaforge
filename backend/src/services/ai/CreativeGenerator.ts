@@ -157,5 +157,209 @@ Return your analysis as JSON with these fields.`;
       };
     }
   }
+
+  /**
+   * Analyze image and generate detailed description for variation generation
+   */
+  async analyzeImageForVariations(
+    imageBuffer: Buffer,
+    userInstructions?: string
+  ): Promise<{
+    description: string;
+    aspectRatio: string;
+    dimensions: { width: number; height: number };
+    style: string;
+    mainSubject: string;
+    colors: string[];
+    textElements: string[];
+  }> {
+    try {
+      const base64Image = imageBuffer.toString('base64');
+      const imageDataUrl = `data:image/png;base64,${base64Image}`;
+
+      // @ts-ignore - image-size doesn't have TypeScript types
+      const sizeOf = require('image-size');
+      const dimensions = sizeOf(imageBuffer);
+      const aspectRatio = `${dimensions.width}:${dimensions.height}`;
+
+      const analysisPrompt = `Analyze this Facebook ad image in detail and provide a comprehensive description. Focus on:
+
+1. Main subject and key elements
+2. Visual style (photography, illustration, graphic design, etc.)
+3. Color palette and dominant colors
+4. Composition and layout
+5. Any text elements and what they say (be precise with spelling)
+6. Mood and tone
+7. Background and setting
+
+${userInstructions ? `\nUser wants variations with these instructions: ${userInstructions}` : ''}
+
+Return your analysis as JSON with these fields:
+- description: Detailed description of the image
+- style: Visual style (e.g., "modern photography", "minimalist design", "vibrant illustration")
+- mainSubject: Main subject or focus of the image
+- colors: Array of dominant colors
+- textElements: Array of any text found in the image with exact spelling
+- composition: Description of layout and composition`;
+
+      const response = await this.getClient().chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: analysisPrompt,
+              },
+              {
+                type: 'image_url',
+                image_url: { url: imageDataUrl },
+              },
+            ],
+          },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 1000,
+      });
+
+      const content = response.choices[0]?.message.content || '{}';
+      const analysis = JSON.parse(content);
+
+      return {
+        description: analysis.description || 'A Facebook ad image',
+        aspectRatio,
+        dimensions: { width: dimensions.width, height: dimensions.height },
+        style: analysis.style || 'modern',
+        mainSubject: analysis.mainSubject || 'product',
+        colors: analysis.colors || [],
+        textElements: analysis.textElements || [],
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to analyze image: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate image variations using OpenAI DALL-E 3
+   * Analyzes the original image, creates prompts based on user instructions,
+   * and generates high-quality variations preserving aspect ratio
+   */
+  async generateImageVariationsWithOpenAI(
+    imageBuffer: Buffer,
+    count: number = 3,
+    userInstructions?: string
+  ): Promise<{
+    imageUrls: string[];
+    prompts: string[];
+    analysis: any;
+  }> {
+    try {
+      // Step 1: Analyze the image
+      const analysis = await this.analyzeImageForVariations(imageBuffer, userInstructions);
+
+      // Step 2: Determine size based on aspect ratio
+      const { width, height } = analysis.dimensions;
+      const ratio = width / height;
+      
+      let size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1024';
+      if (ratio > 1.5) {
+        // Wide image (16:9 or wider)
+        size = '1792x1024';
+      } else if (ratio < 0.7) {
+        // Tall image (9:16 or taller)
+        size = '1024x1792';
+      }
+      // Otherwise use square (1:1)
+
+      // Step 3: Create variation prompts based on analysis and user instructions
+      const variationPrompts: string[] = [];
+      
+      for (let i = 0; i < count; i++) {
+        let prompt = `Create a high-quality Facebook ad image variation. `;
+        
+        // Include original description
+        prompt += `${analysis.description}. `;
+        
+        // Include style
+        prompt += `Style: ${analysis.style}. `;
+        
+        // Include main subject
+        prompt += `Main subject: ${analysis.mainSubject}. `;
+        
+        // Include colors if available
+        if (analysis.colors.length > 0) {
+          prompt += `Color palette: ${analysis.colors.join(', ')}. `;
+        }
+        
+        // Include text elements with explicit instructions for clarity and readability
+        if (analysis.textElements.length > 0) {
+          prompt += `CRITICAL: Include the following text elements exactly as specified. Each text must be:
+- Clearly visible and prominently displayed
+- Correctly spelled (exact spelling: ${analysis.textElements.map((text: string) => `"${text}"`).join(', ')})
+- Normally readable with high contrast against background
+- In a professional, legible font
+- Properly sized for easy reading
+
+Text elements to include: ${analysis.textElements.map((text: string) => `"${text}"`).join(', ')}. `;
+        }
+        
+        // Add user instructions
+        if (userInstructions) {
+          prompt += `Variation requirements: ${userInstructions}. `;
+        } else {
+          // Default variation instructions
+          const variations = [
+            'Change the background while keeping the main subject',
+            'Modify the color scheme while maintaining brand consistency',
+            'Adjust the composition and layout',
+          ];
+          prompt += `Variation ${i + 1}: ${variations[i % variations.length]}. `;
+        }
+        
+        // Quality and text requirements - emphasize text clarity
+        prompt += `IMPORTANT REQUIREMENTS:
+- High quality, professional image
+- Preserve the original aspect ratio (${analysis.aspectRatio})
+- Any text must be clear, correctly spelled, and normally readable
+- Use high contrast for text to ensure readability
+- Maintain the visual style: ${analysis.style}
+- Keep the main subject: ${analysis.mainSubject}`;
+        
+        variationPrompts.push(prompt);
+      }
+
+      // Step 4: Generate all variations
+      const imageUrls: string[] = [];
+      
+      for (const prompt of variationPrompts) {
+        try {
+          const response = await this.getClient().images.generate({
+            model: 'dall-e-3',
+            prompt: prompt,
+            n: 1,
+            size: size,
+            quality: 'hd', // High quality
+            response_format: 'url',
+          });
+
+          if (response.data?.[0]?.url) {
+            imageUrls.push(response.data[0].url);
+          }
+        } catch (error: any) {
+          console.error(`Failed to generate variation ${imageUrls.length + 1}:`, error.message);
+          // Continue with other variations even if one fails
+        }
+      }
+
+      return {
+        imageUrls,
+        prompts: variationPrompts,
+        analysis,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to generate image variations with OpenAI: ${error.message}`);
+    }
+  }
 }
 

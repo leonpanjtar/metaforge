@@ -147,6 +147,133 @@ export const generateSingleImageVariation = async (req: AuthRequest, res: Respon
   }
 };
 
+export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { adsetId, count = 3, instructions } = req.body;
+    const file = (req as any).file;
+
+    if (!adsetId) {
+      res.status(400).json({ error: 'Adset ID is required' });
+      return;
+    }
+
+    if (!file) {
+      res.status(400).json({ error: 'Image file is required' });
+      return;
+    }
+
+    const { Asset } = await import('../models/Asset');
+    const { Adset } = await import('../models/Adset');
+    const { FileStorageService } = await import('../services/storage/FileStorageService');
+    const { CreativeGenerator } = await import('../services/ai/CreativeGenerator');
+    const axios = require('axios');
+    // @ts-ignore - image-size doesn't have TypeScript types
+    const sizeOf = require('image-size');
+
+    // Verify adset ownership
+    const adset = await Adset.findOne({
+      _id: adsetId,
+      userId: req.userId,
+    });
+
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    // Generate variations using OpenAI
+    const creativeGenerator = new CreativeGenerator();
+    const result = await creativeGenerator.generateImageVariationsWithOpenAI(
+      file.buffer,
+      count,
+      instructions
+    );
+
+    if (result.imageUrls.length === 0) {
+      res.status(500).json({ error: 'Failed to generate any image variations' });
+      return;
+    }
+
+    // Download and save generated images
+    const fileStorageService = new FileStorageService();
+    const savedAssets = [];
+
+    for (let i = 0; i < result.imageUrls.length; i++) {
+      try {
+        const imageUrl = result.imageUrls[i];
+        console.log(`[generateImageVariationsWithOpenAI] Downloading variation ${i + 1}: ${imageUrl}`);
+
+        // Download image
+        const imageResponse = await axios.get(imageUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+        });
+
+        const buffer = Buffer.from(imageResponse.data, 'binary');
+
+        // Get image dimensions
+        let metadata: any = {
+          size: buffer.length,
+          mimeType: imageResponse.headers['content-type'] || 'image/png',
+        };
+
+        try {
+          const dimensions = sizeOf(buffer);
+          metadata.width = dimensions.width;
+          metadata.height = dimensions.height;
+        } catch (error) {
+          console.warn('Failed to get image dimensions:', error);
+        }
+
+        // Save file
+        const { filename, filepath, url } = await fileStorageService.saveFileFromBuffer(
+          buffer,
+          adsetId.toString(),
+          `openai-variation-${i + 1}.png`,
+          imageResponse.headers['content-type'],
+          imageUrl
+        );
+
+        // Create asset record
+        const asset = new Asset({
+          adsetId,
+          type: 'image',
+          filename,
+          filepath,
+          url,
+          metadata,
+        });
+
+        await asset.save();
+        savedAssets.push(asset);
+        
+        console.log(`[generateImageVariationsWithOpenAI] Saved asset: ${filename}`);
+      } catch (error: any) {
+        console.error(`[generateImageVariationsWithOpenAI] Failed to download variation ${i + 1}:`, error.message);
+        // Continue with other variations even if one fails
+      }
+    }
+
+    if (savedAssets.length === 0) {
+      res.status(500).json({ error: 'Failed to save any image variations' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: `Generated ${savedAssets.length} image variation(s) using OpenAI DALL-E 3`,
+      assets: savedAssets,
+      count: savedAssets.length,
+      analysis: result.analysis,
+      prompts: result.prompts,
+      provider: 'openai',
+    });
+  } catch (error: any) {
+    console.error('Generate image variations with OpenAI error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate image variations with OpenAI' });
+  }
+};
+
 export const generateImageVariations = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { adsetId, count = 3, prompt, useMetaAI, aiFeatures } = req.body;
