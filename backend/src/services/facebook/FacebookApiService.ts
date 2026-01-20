@@ -171,11 +171,24 @@ export class FacebookApiService {
 
   async createAdset(accountId: string, adsetData: any): Promise<string> {
     try {
+      console.log('[FacebookApiService.createAdset] Request:', {
+        accountId,
+        adsetData: JSON.stringify(adsetData, null, 2),
+      });
       const response = await this.api.post(`/${accountId}/adsets`, adsetData);
       return response.data.id;
     } catch (error: any) {
+      const fbError = error.response?.data?.error;
+      console.error('[FacebookApiService.createAdset] Error:', {
+        message: fbError?.message || error.message,
+        code: fbError?.code,
+        type: fbError?.type,
+        errorSubcode: fbError?.error_subcode,
+        fullError: fbError,
+        requestData: adsetData,
+      });
       throw new Error(
-        `Failed to create adset: ${error.response?.data?.error?.message || error.message}`
+        `Failed to create adset: ${fbError?.message || error.message}`
       );
     }
   }

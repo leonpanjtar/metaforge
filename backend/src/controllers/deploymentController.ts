@@ -50,23 +50,61 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
     let facebookAdsetId = adset.facebookAdsetId;
     if (!facebookAdsetId) {
           // Build comprehensive adset data with all settings
+          const dailyBudget = (adset.dailyBudget || adset.budget || 0) * 100; // Convert to cents
+          const lifetimeBudget = adset.lifetimeBudget ? adset.lifetimeBudget * 100 : undefined;
+          
+          // Validate budget - Facebook requires at least one budget type
+          if (dailyBudget <= 0 && !lifetimeBudget) {
+            res.status(400).json({
+              error: 'Invalid budget',
+              details: 'Adset must have either a daily budget or lifetime budget greater than 0',
+            });
+            return;
+          }
+
+          // Build targeting object
+          const targeting: any = {
+            age_min: adset.targeting.ageMin || 18,
+            age_max: adset.targeting.ageMax || 65,
+            genders: adset.targeting.genders || [0], // Default to all genders
+          };
+
+          // Geo locations
+          if (adset.targeting.locations && adset.targeting.locations.length > 0) {
+            targeting.geo_locations = {
+              countries: adset.targeting.locations,
+            };
+          }
+
+          // Interests - only include if not empty
+          if (adset.targeting.interests && adset.targeting.interests.length > 0) {
+            targeting.interests = adset.targeting.interests.map((name) => ({ name }));
+          }
+
+          // Behaviors - only include if not empty
+          if (adset.targeting.behaviors && adset.targeting.behaviors.length > 0) {
+            targeting.behaviors = adset.targeting.behaviors.map((name) => ({ name }));
+          }
+
+          // Publisher platforms - default to facebook and instagram if empty
+          const placements = adset.targeting.placements && adset.targeting.placements.length > 0
+            ? adset.targeting.placements
+            : ['facebook', 'instagram'];
+          targeting.publisher_platforms = placements;
+
           const adsetData: any = {
             name: adset.name,
             campaign_id: campaign.facebookCampaignId,
-            targeting: {
-              age_min: adset.targeting.ageMin,
-              age_max: adset.targeting.ageMax,
-              genders: adset.targeting.genders,
-              geo_locations: {
-                countries: adset.targeting.locations || [],
-              },
-              interests: adset.targeting.interests?.map((name) => ({ name })) || [],
-              behaviors: adset.targeting.behaviors?.map((name) => ({ name })) || [],
-              publisher_platforms: adset.targeting.placements || ['facebook', 'instagram'],
-            },
-            daily_budget: (adset.dailyBudget || adset.budget) * 100, // Convert to cents
-            status: adset.status,
+            targeting: targeting,
+            status: adset.status || 'PAUSED',
           };
+
+          // Add budget (daily or lifetime, but not both)
+          if (lifetimeBudget) {
+            adsetData.lifetime_budget = lifetimeBudget;
+          } else if (dailyBudget > 0) {
+            adsetData.daily_budget = dailyBudget;
+          }
 
           // Add optimization and conversion settings
           if (adset.optimizationGoal) {
@@ -84,21 +122,33 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           if (adset.promotedObject) {
             adsetData.promoted_object = adset.promotedObject;
           }
-          if (adset.attributionSpec) {
+          if (adset.attributionSpec && adset.attributionSpec.length > 0) {
             adsetData.attribution_spec = adset.attributionSpec;
           }
-          // conversion_specs is not available on AdSet API - conversion info is in promoted_object
-          // if (adset.conversionSpecs) {
-          //   adsetData.conversion_specs = adset.conversionSpecs;
-          // }
+          
+          // Start time - Facebook API expects Unix timestamp (seconds since epoch)
+          // Only include if it's in the future or very recent (within last hour)
           if (adset.startTime) {
-            adsetData.start_time = adset.startTime;
+            let startTimeValue: number;
+            if (typeof adset.startTime === 'string') {
+              const startTime = new Date(adset.startTime);
+              const now = new Date();
+              // If start time is more than 1 hour in the past, use current time
+              if (startTime.getTime() < now.getTime() - 3600000) {
+                startTimeValue = Math.floor(now.getTime() / 1000);
+              } else {
+                startTimeValue = Math.floor(startTime.getTime() / 1000);
+              }
+            } else {
+              // Already a timestamp
+              startTimeValue = adset.startTime;
+            }
+            adsetData.start_time = startTimeValue;
           }
+          
+          // End time - only include if provided
           if (adset.endTime) {
             adsetData.end_time = adset.endTime;
-          }
-          if (adset.lifetimeBudget) {
-            adsetData.lifetime_budget = adset.lifetimeBudget * 100; // Convert to cents
           }
 
       try {
