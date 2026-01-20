@@ -210,66 +210,42 @@ const AdsetEditor = () => {
 
   // Track edited copy content
   const [editedCopyContent, setEditedCopyContent] = useState<Record<string, string>>({});
-  const [savingCopyIds, setSavingCopyIds] = useState<Set<string>>(new Set());
-  const [savedCopyIds, setSavedCopyIds] = useState<Set<string>>(new Set());
+  // Removed saving/saved state - autosave is now silent
   const saveTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // Update copy mutation
+  // Update copy mutation - silent autosave
   const updateCopyMutation = useMutation({
     mutationFn: async ({ copyId, content }: { copyId: string; content: string }) => {
       await api.put(`/ad-copies/${copyId}`, { content });
     },
     onSuccess: (_data, variables) => {
-      // Update local state
+      // Update local state silently - remove from edited content since it's now saved
       setEditedCopyContent(prev => {
         const next = { ...prev };
         delete next[variables.copyId];
         return next;
       });
-      setSavingCopyIds(prev => {
-        const next = new Set(prev);
-        next.delete(variables.copyId);
-        return next;
-      });
-      setSavedCopyIds(prev => new Set(prev).add(variables.copyId));
-      // Clear saved indicator after 2 seconds
-      setTimeout(() => {
-        setSavedCopyIds(prev => {
-          const next = new Set(prev);
-          next.delete(variables.copyId);
-          return next;
-        });
-      }, 2000);
-      // Invalidate to refresh the list
+      // Silently invalidate to refresh the list in background
       queryClient.invalidateQueries({ queryKey: ['ad-copies', adsetId] });
     },
-    onError: (_error: any, variables) => {
-      setSavingCopyIds(prev => {
-        const next = new Set(prev);
-        next.delete(variables.copyId);
-        return next;
-      });
+    onError: (_error: any) => {
+      // Silent error - could add toast notification here if needed
+      console.error('Failed to save copy:', _error);
     },
   });
 
-  // Handle copy content change with debounced autosave
+  // Handle copy content change with debounced autosave (silent)
   const handleCopyContentChange = (copyId: string, newContent: string) => {
     // Update local state immediately for responsive UI
     setEditedCopyContent(prev => ({ ...prev, [copyId]: newContent }));
-    setSavedCopyIds(prev => {
-      const next = new Set(prev);
-      next.delete(copyId);
-      return next;
-    });
 
     // Clear existing timeout for this copy
     if (saveTimeoutsRef.current[copyId]) {
       clearTimeout(saveTimeoutsRef.current[copyId]);
     }
 
-    // Set new timeout for autosave (1 second after user stops typing)
+    // Set new timeout for silent autosave (1 second after user stops typing)
     saveTimeoutsRef.current[copyId] = setTimeout(() => {
-      setSavingCopyIds(prev => new Set(prev).add(copyId));
       updateCopyMutation.mutate({ copyId, content: newContent });
       delete saveTimeoutsRef.current[copyId];
     }, 1000);
@@ -1323,9 +1299,6 @@ const AdsetEditor = () => {
                             const displayContent = editedCopyContent[copy._id] !== undefined 
                               ? editedCopyContent[copy._id] 
                               : copy.content;
-                            const isSaving = savingCopyIds.has(copy._id);
-                            const isSaved = savedCopyIds.has(copy._id);
-                            
                             // Determine textarea size based on type
                             const isBody = type === 'body';
                             const isCTA = type === 'cta';
@@ -1357,24 +1330,7 @@ const AdsetEditor = () => {
                                     rows={isBody ? 5 : isCTA ? 2 : 1}
                                   />
                                   <div className="flex items-start gap-2 flex-shrink-0">
-                                    {isSaving && (
-                                      <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded flex items-center gap-1">
-                                        <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Saving...
-                                      </span>
-                                    )}
-                                    {isSaved && !isSaving && (
-                                      <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded flex items-center gap-1">
-                                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Saved
-                                      </span>
-                                    )}
-                                    {copy.generatedByAI && !isSaving && !isSaved && (
+                                    {copy.generatedByAI && (
                                       <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
                                         AI
                                       </span>
