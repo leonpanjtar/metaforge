@@ -106,6 +106,11 @@ const AdsetEditor = () => {
   // Asset variant generation state
   const [assetVariantCounts, setAssetVariantCounts] = useState<Record<string, number>>({});
   const [generatingForAsset, setGeneratingForAsset] = useState<string | null>(null);
+  const [showVariantGenerator, setShowVariantGenerator] = useState(false);
+  const [selectedAssetForVariants, setSelectedAssetForVariants] = useState<Asset | null>(null);
+  const [variantCount, setVariantCount] = useState(3);
+  const [variantPrompt, setVariantPrompt] = useState('');
+  const [variantProvider, setVariantProvider] = useState<'meta' | 'openai'>('openai');
 
   // Fetch adset
   const { data: adset } = useQuery<Adset>({
@@ -250,7 +255,7 @@ const AdsetEditor = () => {
     },
   });
 
-  // Generate variants mutation
+  // Generate variants mutation (Meta AI)
   const generateVariantsMutation = useMutation({
     mutationFn: async (data: { 
       assetId: string; 
@@ -270,30 +275,85 @@ const AdsetEditor = () => {
     },
   });
 
-  const handleGenerateVariantsForAsset = async (assetId: string) => {
-    const count = assetVariantCounts[assetId] || 3;
-    if (count < 1) {
-      alert('Please enter a number greater than 0');
-      return;
-    }
-
-    setGeneratingForAsset(assetId);
-    try {
-      await generateVariantsMutation.mutateAsync({
-        assetId,
-        count,
-        aiFeatures: {
-          textGeneration: true,
-          imageExpansion: true,
-          backgroundGeneration: true,
-        },
+  // Generate variants mutation (OpenAI)
+  const generateOpenAIVariantsMutation = useMutation({
+    mutationFn: async (data: FormData) => {
+      const response = await api.post('/ai/generate-image-variations-openai', data, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      // Reset count after successful generation
-      setAssetVariantCounts(prev => ({ ...prev, [assetId]: 3 }));
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Failed to generate variants');
-    } finally {
-      setGeneratingForAsset(null);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+    },
+  });
+
+  const handleGenerateVariantsForAsset = async (assetId: string) => {
+    const asset = assets?.find(a => a._id === assetId);
+    if (!asset) return;
+    
+    setSelectedAssetForVariants(asset);
+    setVariantCount(assetVariantCounts[assetId] || 3);
+    setVariantPrompt('');
+    setShowVariantGenerator(true);
+  };
+
+  const handleGenerateVariants = async () => {
+    if (!selectedAssetForVariants || !adsetId) return;
+
+    const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+
+    if (variantProvider === 'openai') {
+      if (!variantPrompt.trim()) {
+        alert('Please provide variation instructions for OpenAI generation');
+        return;
+      }
+      
+      setGeneratingForAsset(selectedAssetForVariants._id);
+      try {
+        // Fetch the image file
+        const imageResponse = await fetch(`${API_URL}${selectedAssetForVariants.url}`);
+        const imageBlob = await imageResponse.blob();
+        
+        // Create FormData
+        const formData = new FormData();
+        formData.append('image', imageBlob, selectedAssetForVariants.filename);
+        formData.append('adsetId', adsetId);
+        formData.append('count', variantCount.toString());
+        formData.append('instructions', variantPrompt);
+        
+        const result = await generateOpenAIVariantsMutation.mutateAsync(formData);
+        alert(`Successfully generated ${result.count} variation(s)!`);
+        setShowVariantGenerator(false);
+        setSelectedAssetForVariants(null);
+        setVariantPrompt('');
+      } catch (error: any) {
+        alert(error.response?.data?.error || 'Failed to generate variants');
+      } finally {
+        setGeneratingForAsset(null);
+      }
+    } else {
+      // Meta AI flow
+      setGeneratingForAsset(selectedAssetForVariants._id);
+      try {
+        await generateVariantsMutation.mutateAsync({
+          assetId: selectedAssetForVariants._id,
+          count: variantCount,
+          prompt: variantPrompt || undefined,
+          aiFeatures: {
+            textGeneration: true,
+            imageExpansion: true,
+            backgroundGeneration: false,
+          },
+        });
+        setShowVariantGenerator(false);
+        setSelectedAssetForVariants(null);
+        setVariantPrompt('');
+      } catch (error: any) {
+        alert(error.response?.data?.error || 'Failed to generate variants');
+      } finally {
+        setGeneratingForAsset(null);
+      }
     }
   };
 
@@ -1202,6 +1262,155 @@ const AdsetEditor = () => {
           )}
         </div>
       </div>
+
+      {/* Variant Generator Modal */}
+      {showVariantGenerator && selectedAssetForVariants && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            setShowVariantGenerator(false);
+            setSelectedAssetForVariants(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setShowVariantGenerator(false);
+                setSelectedAssetForVariants(null);
+              }}
+              className="absolute top-4 right-4 bg-black bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-opacity-75 z-10"
+            >
+              ×
+            </button>
+            <div className="p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">
+                Generate Image Variants
+              </h2>
+
+              <div className="space-y-4">
+                {/* Provider Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    AI Provider
+                  </label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="provider"
+                        value="openai"
+                        checked={variantProvider === 'openai'}
+                        onChange={() => setVariantProvider('openai')}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">
+                        <strong>OpenAI DALL-E 3</strong> (Recommended)
+                        <span className="block text-xs text-gray-500 mt-1">
+                          High quality, preserves aspect ratio, clear readable text
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="provider"
+                        value="meta"
+                        checked={variantProvider === 'meta'}
+                        onChange={() => setVariantProvider('meta')}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">
+                        <strong>Meta AI</strong>
+                        <span className="block text-xs text-gray-500 mt-1">
+                          Preview only (may not work)
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Number of Variants
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={variantCount}
+                    onChange={(e) => setVariantCount(parseInt(e.target.value) || 3)}
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    {variantProvider === 'openai' 
+                      ? 'OpenAI will generate high-quality variations based on your image analysis.'
+                      : 'Meta AI will generate variations automatically. This number helps organize previews.'}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Variation Instructions {variantProvider === 'openai' && '(Required)'}
+                  </label>
+                  <textarea
+                    value={variantPrompt}
+                    onChange={(e) => setVariantPrompt(e.target.value)}
+                    rows={4}
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    placeholder={
+                      variantProvider === 'openai'
+                        ? "Describe how you want the variations to differ (e.g., 'change background to beach scene', 'use warmer colors', 'add more contrast', 'modify text to say X'). The AI will analyze your image and create variations based on these instructions."
+                        : "Describe how you want the variations to differ (e.g., 'different color schemes', 'various backgrounds', 'different text styles'). Leave empty to let Meta AI decide."
+                    }
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    {variantProvider === 'openai'
+                      ? 'The system will analyze your image first, then create prompts for each variation based on your instructions. Text will be clear and readable.'
+                      : 'Meta AI will use these instructions as guidance when generating variations.'}
+                  </p>
+                </div>
+
+                {variantProvider === 'openai' && (
+                  <div className="bg-green-50 p-4 rounded-md border border-green-200">
+                    <p className="text-sm text-green-800">
+                      <strong>OpenAI DALL-E 3 Features:</strong>
+                      <ul className="list-disc list-inside mt-2 space-y-1">
+                        <li>Analyzes your image automatically</li>
+                        <li>Preserves original aspect ratio</li>
+                        <li>High quality (HD) output</li>
+                        <li>Clear, readable text</li>
+                        <li>Variations saved directly to your assets</li>
+                      </ul>
+                    </p>
+                  </div>
+                )}
+
+                {variantProvider === 'meta' && (
+                  <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
+                    <p className="text-sm text-blue-800">
+                      <strong>Note:</strong> Meta AI generates variations when creating ads. These previews 
+                      show what Meta will create. You can review and cherry-pick the best variations before deploying.
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleGenerateVariants}
+                  disabled={generatingForAsset === selectedAssetForVariants._id || (variantProvider === 'openai' && !variantPrompt.trim())}
+                  className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  {generatingForAsset === selectedAssetForVariants._id 
+                    ? `Generating ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI' : 'Meta AI'}...` 
+                    : `Generate ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI DALL-E 3' : 'Meta AI'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
