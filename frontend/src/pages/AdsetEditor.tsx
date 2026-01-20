@@ -41,10 +41,12 @@ interface AdCopy {
 interface Combination {
   _id: string;
   assetIds: any[];
-  headlineId: { content: string };
-  bodyId: { content: string };
-  descriptionId: { content: string };
-  ctaId: { content: string };
+  headlineId: { _id: string; content: string };
+  hookId?: { _id: string; content: string };
+  bodyId: { _id: string; content: string };
+  descriptionId: { _id: string; content: string };
+  ctaId: { _id: string; content: string };
+  url?: string;
   scores: {
     hook: number;
     alignment: number;
@@ -53,7 +55,7 @@ interface Combination {
     match: number;
   };
   overallScore: number;
-  predictedCTR: number;
+  predictedCTR?: number;
   deployedToFacebook?: boolean;
   facebookAdId?: string;
 }
@@ -297,14 +299,43 @@ const AdsetEditor = () => {
     },
   });
 
+  // Component selection state
+  const [selectedComponents, setSelectedComponents] = useState<{
+    assets: string[];
+    hooks: string[];
+    bodies: string[];
+    ctas: string[];
+    headlines: string[];
+    descriptions: string[];
+  }>({
+    assets: [],
+    hooks: [],
+    bodies: [],
+    ctas: [],
+    headlines: [],
+    descriptions: [],
+  });
+
+  // Selected combinations state (all selected by default when generated)
+  const [selectedCombinations, setSelectedCombinations] = useState<Set<string>>(new Set());
+
+  // Preview state
+  const [previewingCombination, setPreviewingCombination] = useState<Combination | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
   // Generate combinations mutation
   const generateCombinationsMutation = useMutation({
-    mutationFn: async () => {
-      const response = await api.post(`/combinations/generate/${adsetId}`);
+    mutationFn: async (components: typeof selectedComponents) => {
+      const response = await api.post(`/combinations/generate/${adsetId}`, components);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['combinations', adsetId] });
+      // Select all combinations by default
+      if (data.combinations) {
+        setSelectedCombinations(new Set(data.combinations.map((c: Combination) => c._id)));
+      }
     },
   });
 
@@ -655,8 +686,28 @@ const AdsetEditor = () => {
   };
 
   const handleGenerateCombinations = async () => {
-    await generateCombinationsMutation.mutateAsync();
+    await generateCombinationsMutation.mutateAsync(selectedComponents);
     setActiveTab('combinations');
+  };
+
+  const handlePreviewCombination = async (combination: Combination) => {
+    setPreviewingCombination(combination);
+    setLoadingPreview(true);
+    try {
+      const response = await api.get(`/combinations/preview/${adsetId}/${combination._id}`);
+      // Preview HTML is in response.data.previews
+      if (response.data.previews && response.data.previews.length > 0) {
+        const preview = response.data.previews[0];
+        setPreviewHtml(preview.body || preview.html || '');
+      } else {
+        setPreviewHtml('<p>Preview not available</p>');
+      }
+    } catch (error: any) {
+      console.error('Preview error:', error);
+      setPreviewHtml(`<p>Error loading preview: ${error.response?.data?.error || error.message}</p>`);
+    } finally {
+      setLoadingPreview(false);
+    }
   };
 
   const handleDeploy = async (combinationIds: string[], status: 'PAUSED' | 'ACTIVE') => {
@@ -1463,24 +1514,268 @@ const AdsetEditor = () => {
           {/* Combinations & Deploy Tab */}
           {activeTab === 'combinations' && (
             <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">Ad Combinations</h2>
-                <button
-                  onClick={handleGenerateCombinations}
-                  disabled={generateCombinationsMutation.isPending}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {generateCombinationsMutation.isPending ? 'Generating...' : 'Generate Combinations'}
-                </button>
-              </div>
+              {/* Component Selector */}
+              {(!combinations || combinations.length === 0) && (
+                <div className="bg-white rounded-lg shadow p-6">
+                  <h2 className="text-xl font-semibold mb-4">Select Components for Combinations</h2>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Choose which components to use when generating ad combinations. Leave all unchecked to use all available components.
+                  </p>
 
-              {combinations && combinations.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* Assets */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Assets ({assets?.length || 0})
+                      </label>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {assets && assets.length > 0 ? (
+                          assets.map((asset) => (
+                            <label key={asset._id} className="flex items-center gap-2 py-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedComponents.assets.includes(asset._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      assets: [...prev.assets, asset._id]
+                                    }));
+                                  } else {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      assets: prev.assets.filter(id => id !== asset._id)
+                                    }));
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate">{asset.filename}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500">No assets available</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Hooks */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Hooks ({copies?.filter(c => c.type === 'hook').length || 0})
+                      </label>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {copies && copies.filter(c => c.type === 'hook').length > 0 ? (
+                          copies.filter(c => c.type === 'hook').map((hook) => (
+                            <label key={hook._id} className="flex items-center gap-2 py-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedComponents.hooks.includes(hook._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      hooks: [...prev.hooks, hook._id]
+                                    }));
+                                  } else {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      hooks: prev.hooks.filter(id => id !== hook._id)
+                                    }));
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate text-xs">{hook.content.substring(0, 50)}...</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500">No hooks available</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bodies */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Bodies ({copies?.filter(c => c.type === 'body').length || 0})
+                      </label>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {copies && copies.filter(c => c.type === 'body').length > 0 ? (
+                          copies.filter(c => c.type === 'body').map((body) => (
+                            <label key={body._id} className="flex items-center gap-2 py-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedComponents.bodies.includes(body._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      bodies: [...prev.bodies, body._id]
+                                    }));
+                                  } else {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      bodies: prev.bodies.filter(id => id !== body._id)
+                                    }));
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate text-xs">{body.content.substring(0, 50)}...</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500">No bodies available</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* CTAs */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        CTAs ({copies?.filter(c => c.type === 'cta').length || 0})
+                      </label>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {copies && copies.filter(c => c.type === 'cta').length > 0 ? (
+                          copies.filter(c => c.type === 'cta').map((cta) => (
+                            <label key={cta._id} className="flex items-center gap-2 py-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedComponents.ctas.includes(cta._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      ctas: [...prev.ctas, cta._id]
+                                    }));
+                                  } else {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      ctas: prev.ctas.filter(id => id !== cta._id)
+                                    }));
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate text-xs">{cta.content}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500">No CTAs available</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Headlines */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Headlines ({copies?.filter(c => c.type === 'headline').length || 0})
+                      </label>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {copies && copies.filter(c => c.type === 'headline').length > 0 ? (
+                          copies.filter(c => c.type === 'headline').map((headline) => (
+                            <label key={headline._id} className="flex items-center gap-2 py-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedComponents.headlines.includes(headline._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      headlines: [...prev.headlines, headline._id]
+                                    }));
+                                  } else {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      headlines: prev.headlines.filter(id => id !== headline._id)
+                                    }));
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate text-xs">{headline.content.substring(0, 50)}...</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500">No headlines available</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Descriptions */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Descriptions ({copies?.filter(c => c.type === 'description').length || 0})
+                      </label>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {copies && copies.filter(c => c.type === 'description').length > 0 ? (
+                          copies.filter(c => c.type === 'description').map((desc) => (
+                            <label key={desc._id} className="flex items-center gap-2 py-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedComponents.descriptions.includes(desc._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      descriptions: [...prev.descriptions, desc._id]
+                                    }));
+                                  } else {
+                                    setSelectedComponents(prev => ({
+                                      ...prev,
+                                      descriptions: prev.descriptions.filter(id => id !== desc._id)
+                                    }));
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate text-xs">{desc.content.substring(0, 50)}...</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500">No descriptions available</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      onClick={handleGenerateCombinations}
+                      disabled={generateCombinationsMutation.isPending}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {generateCombinationsMutation.isPending ? 'Generating...' : 'Generate Combinations'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Combinations List */}
+              {combinations && combinations.length > 0 && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
-                    <p className="text-sm text-gray-600">
-                      {combinations.length} combination(s) generated
-                    </p>
+                    <h2 className="text-xl font-semibold">Ad Combinations ({combinations.length})</h2>
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          // Select all
+                          setSelectedCombinations(new Set(combinations.map(c => c._id)));
+                        }}
+                        className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        onClick={() => {
+                          // Deselect all
+                          setSelectedCombinations(new Set());
+                        }}
+                        className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                      >
+                        Deselect All
+                      </button>
                       <select
                         id="deploy-status"
                         className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -1491,11 +1786,7 @@ const AdsetEditor = () => {
                       </select>
                       <button
                         onClick={() => {
-                          const selectedIds = Array.from(
-                            document.querySelectorAll<HTMLInputElement>(
-                              'input[type="checkbox"]:checked'
-                            )
-                          ).map((cb) => cb.value);
+                          const selectedIds = Array.from(selectedCombinations);
                           if (selectedIds.length === 0) {
                             alert('Please select at least one combination to deploy');
                             return;
@@ -1508,66 +1799,120 @@ const AdsetEditor = () => {
                         disabled={deployMutation.isPending}
                         className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
                       >
-                        {deployMutation.isPending ? 'Deploying...' : 'Deploy Selected'}
+                        {deployMutation.isPending ? 'Deploying...' : `Deploy Selected (${selectedCombinations.size})`}
                       </button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {combinations.map((combination) => (
-                      <div
-                        key={combination._id}
-                        className="border rounded-lg p-4 bg-white hover:shadow-md transition-shadow"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <label className="flex items-center">
-                            <input
-                              type="checkbox"
-                              value={combination._id}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="ml-2 text-sm font-medium">Select</span>
-                          </label>
-                          <div className="text-right">
-                            <div className="text-lg font-bold text-blue-600">
-                              {Math.round(combination.overallScore)}
+                    {combinations.map((combination) => {
+                      // Build ad body: hook + body + CTA
+                      let adBody = '';
+                      if (combination.hookId?.content) {
+                        adBody += combination.hookId.content + '\n\n';
+                      }
+                      if (combination.bodyId?.content) {
+                        adBody += combination.bodyId.content;
+                      }
+                      if (combination.ctaId?.content) {
+                        adBody += '\n\n' + combination.ctaId.content;
+                      }
+
+                      const asset = combination.assetIds?.[0];
+                      const isSelected = selectedCombinations.has(combination._id);
+
+                      return (
+                        <div
+                          key={combination._id}
+                          className={`border-2 rounded-lg p-4 bg-white hover:shadow-md transition-shadow ${
+                            isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <label className="flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedCombinations(prev => new Set([...prev, combination._id]));
+                                  } else {
+                                    setSelectedCombinations(prev => {
+                                      const newSet = new Set(prev);
+                                      newSet.delete(combination._id);
+                                      return newSet;
+                                    });
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="ml-2 text-sm font-medium">Select</span>
+                            </label>
+                            <div className="text-right">
+                              <div className="text-lg font-bold text-blue-600">
+                                {Math.round(combination.overallScore || 0)}
+                              </div>
+                              <div className="text-xs text-gray-500">Score</div>
                             </div>
-                            <div className="text-xs text-gray-500">Score</div>
                           </div>
-                        </div>
 
-                        <div className="space-y-2 text-sm">
-                          <div>
-                            <span className="font-medium">Headline:</span>{' '}
-                            <span className="text-gray-700">{combination.headlineId.content}</span>
-                          </div>
-                          <div>
-                            <span className="font-medium">Body:</span>{' '}
-                            <span className="text-gray-700 line-clamp-2">
-                              {combination.bodyId.content}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="font-medium">CTA:</span>{' '}
-                            <span className="text-gray-700">{combination.ctaId.content}</span>
-                          </div>
-                        </div>
+                          {/* Creative Preview */}
+                          {asset && (
+                            <div className="mb-3">
+                              {asset.type === 'image' ? (
+                                <img
+                                  src={`${API_URL}${asset.url}`}
+                                  alt="Creative"
+                                  className="w-full h-32 object-cover rounded-lg border border-gray-200"
+                                />
+                              ) : (
+                                <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center border border-gray-200">
+                                  <span className="text-gray-500 text-sm">Video</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
-                        {combination.deployedToFacebook && (
-                          <div className="mt-2 text-xs text-green-600">
-                            ✓ Deployed (ID: {combination.facebookAdId})
+                          <div className="space-y-2 text-sm mb-3">
+                            <div>
+                              <span className="font-medium text-gray-700">Headline:</span>
+                              <p className="text-gray-900 mt-1">{combination.headlineId?.content || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Body:</span>
+                              <p className="text-gray-900 mt-1 whitespace-pre-wrap line-clamp-3">{adBody || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Description:</span>
+                              <p className="text-gray-900 mt-1 line-clamp-2">{combination.descriptionId?.content || 'N/A'}</p>
+                            </div>
+                            {combination.url && (
+                              <div>
+                                <span className="font-medium text-gray-700">URL:</span>
+                                <p className="text-gray-600 mt-1 truncate text-xs">{combination.url}</p>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
+
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => handlePreviewCombination(combination)}
+                              disabled={loadingPreview}
+                              className="flex-1 px-3 py-2 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {loadingPreview && previewingCombination?._id === combination._id ? 'Loading...' : 'Preview'}
+                            </button>
+                          </div>
+
+                          {combination.deployedToFacebook && (
+                            <div className="mt-2 text-xs text-green-600">
+                              ✓ Deployed (ID: {combination.facebookAdId})
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>
-                    No combinations generated yet. Click "Generate Combinations" to create all
-                    possible ad combinations.
-                  </p>
                 </div>
               )}
             </div>

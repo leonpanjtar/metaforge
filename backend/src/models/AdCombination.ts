@@ -12,9 +12,11 @@ export interface IAdCombination extends Document {
   adsetId: mongoose.Types.ObjectId;
   assetIds: mongoose.Types.ObjectId[];
   headlineId: mongoose.Types.ObjectId;
+  hookId?: mongoose.Types.ObjectId; // Optional hook
   bodyId: mongoose.Types.ObjectId;
   descriptionId: mongoose.Types.ObjectId;
   ctaId: mongoose.Types.ObjectId;
+  url?: string; // Landing page URL
   scores: IScores;
   overallScore: number;
   predictedCTR?: number;
@@ -64,6 +66,13 @@ const AdCombinationSchema = new Schema<IAdCombination>(
       type: Schema.Types.ObjectId,
       ref: 'AdCopy',
       required: true,
+    },
+    hookId: {
+      type: Schema.Types.ObjectId,
+      ref: 'AdCopy',
+    },
+    url: {
+      type: String,
     },
     scores: {
       type: ScoresSchema,
