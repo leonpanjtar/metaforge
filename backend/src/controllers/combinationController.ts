@@ -283,6 +283,11 @@ export const previewCombination = async (
       adBody += '\n\n' + cta.content;
     }
 
+    // Ensure accountId has 'act_' prefix for Facebook API
+    const adAccountId = updatedAccount.accountId.startsWith('act_') 
+      ? updatedAccount.accountId 
+      : `act_${updatedAccount.accountId}`;
+
     // Get image URL - need to upload to Facebook first to get hash
     const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.API_URL || 'http://localhost:3001';
     let imageHash = asset.metadata?.facebookImageHash;
@@ -293,7 +298,7 @@ export const previewCombination = async (
         const imageUrl = asset.url.startsWith('http') 
           ? asset.url 
           : `${PUBLIC_BASE_URL}${asset.url}`;
-        imageHash = await facebookApi.uploadAdImage(updatedAccount.accountId, imageUrl);
+        imageHash = await facebookApi.uploadAdImage(adAccountId, imageUrl);
       } catch (error: any) {
         console.error('Failed to upload image for preview:', error);
         // Continue without hash - preview might still work
@@ -319,7 +324,7 @@ export const previewCombination = async (
 
     // Generate preview (generate for mobile feed first)
     const previews = await facebookApi.generateAIPreviews(
-      updatedAccount.accountId,
+      adAccountId,
       creativeSpec,
       'MOBILE_FEED_STANDARD'
     );
