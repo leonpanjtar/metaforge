@@ -16,6 +16,7 @@ export interface IAdCombination extends Document {
   bodyId: mongoose.Types.ObjectId;
   descriptionId: mongoose.Types.ObjectId;
   ctaId: mongoose.Types.ObjectId;
+  ctaType?: string; // Facebook CTA button type (e.g., 'LEARN_MORE', 'SHOP_NOW', etc.)
   url?: string; // Landing page URL
   scores: IScores;
   overallScore: number;
@@ -72,6 +73,9 @@ const AdCombinationSchema = new Schema<IAdCombination>(
       ref: 'AdCopy',
     },
     url: {
+      type: String,
+    },
+    ctaType: {
       type: String,
     },
     scores: {

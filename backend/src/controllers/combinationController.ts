@@ -124,6 +124,7 @@ export const generateCombinations = async (
                     bodyId: body._id,
                     descriptionId: description._id,
                     ctaId: cta._id,
+                    ctaType: 'LEARN_MORE', // Default CTA type, can be changed later
                     url: landingPageUrl,
                     scores: scoring.scores,
                     overallScore: scoring.overallScore,
@@ -305,6 +306,9 @@ export const previewCombination = async (
       }
     }
 
+    // Use the selected CTA type from combination, or fallback to LEARN_MORE
+    const ctaType = combination.ctaType || 'LEARN_MORE';
+
     const creativeSpec = {
       objectStorySpec: {
         page_id: pageId,
@@ -315,7 +319,7 @@ export const previewCombination = async (
           name: headline?.content || '',
           description: description?.content || '',
           call_to_action: {
-            type: cta?.content?.toUpperCase().replace(/\s+/g, '_') || 'LEARN_MORE',
+            type: ctaType,
           },
         },
       },
@@ -347,6 +351,46 @@ export const previewCombination = async (
       error: 'Failed to generate preview',
       details: error.message || 'Unknown error'
     });
+  }
+};
+
+export const updateCombination = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const { adsetId, combinationId } = req.params;
+    const { ctaType } = req.body;
+
+    const adset = await Adset.findOne({
+      _id: adsetId,
+      userId: req.userId,
+    });
+
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    const combination = await AdCombination.findOne({
+      _id: combinationId,
+      adsetId,
+    });
+
+    if (!combination) {
+      res.status(404).json({ error: 'Combination not found' });
+      return;
+    }
+
+    if (ctaType !== undefined) {
+      combination.ctaType = ctaType;
+      await combination.save();
+    }
+
+    res.json({ success: true, combination });
+  } catch (error: any) {
+    console.error('Update combination error:', error);
+    res.status(500).json({ error: 'Failed to update combination' });
   }
 };
 

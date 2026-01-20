@@ -3,6 +3,7 @@ import {
   generateCombinations,
   getCombinations,
   previewCombination,
+  updateCombination,
   deleteCombination,
   deleteCombinationsBulk,
 } from '../controllers/combinationController';
@@ -13,6 +14,7 @@ const router = Router();
 router.post('/generate/:adsetId', authenticate, generateCombinations);
 router.get('/:adsetId', authenticate, getCombinations);
 router.get('/preview/:adsetId/:combinationId', authenticate, previewCombination);
+router.put('/:adsetId/:combinationId', authenticate, updateCombination);
 router.delete('/:adsetId/:combinationId', authenticate, deleteCombination);
 router.post('/bulk-delete/:adsetId', authenticate, deleteCombinationsBulk);
 
