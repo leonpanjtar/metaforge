@@ -412,6 +412,11 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
         process.env.API_URL ||
         'http://localhost:3001';
       const imageUrl = `${baseUrl}${asset.url}`;
+      console.log('[generateVariantsFromAsset] Using image URL for upload:', {
+        baseUrl,
+        assetUrl: asset.url,
+        imageUrl,
+      });
       
       // Check if URL is publicly accessible (not localhost)
       const isLocalhost =
@@ -425,6 +430,7 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
         
         // Try to upload anyway - it will fail, but we'll handle it gracefully
         try {
+          console.log('[generateVariantsFromAsset] Attempting localhost upload (expected to fail)');
           imageHash = await apiService.uploadAdImage(
             `act_${facebookAccount.accountId}`,
             imageUrl
@@ -457,6 +463,10 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
       } else {
         // URL is publicly accessible, try to upload
         try {
+          console.log('[generateVariantsFromAsset] Attempting public upload', {
+            accountId: `act_${facebookAccount.accountId}`,
+            imageUrl,
+          });
           imageHash = await apiService.uploadAdImage(
             `act_${facebookAccount.accountId}`,
             imageUrl
@@ -469,6 +479,9 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
           };
           await asset.save();
         } catch (uploadError: any) {
+          console.error('[generateVariantsFromAsset] Public upload failed', {
+            message: uploadError.message,
+          });
           res.status(500).json({ 
             error: `Failed to upload image to Facebook: ${uploadError.message}`,
             details: 'Please ensure:\n' +

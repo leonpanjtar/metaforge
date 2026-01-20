@@ -139,10 +139,15 @@ export class FacebookApiService {
 
   async uploadAdImage(accountId: string, imageUrl: string): Promise<string> {
     try {
+      console.log('[FacebookApiService.uploadAdImage] Request', {
+        accountId,
+        imageUrl,
+      });
       // Method 1: Try URL-based upload (simplest)
       const response = await this.api.post(`/${accountId}/adimages`, {
         url: imageUrl,
       });
+      console.log('[FacebookApiService.uploadAdImage] Response data', response.data);
       
       if (response.data.images && response.data.images[0]) {
         return response.data.images[0].hash;
@@ -150,8 +155,16 @@ export class FacebookApiService {
       
       throw new Error('No image hash returned from Facebook');
     } catch (error: any) {
-      const errorCode = error.response?.data?.error?.code;
-      const errorMessage = error.response?.data?.error?.message || error.message;
+      const fbError = error.response?.data?.error;
+      const errorCode = fbError?.code;
+      const errorMessage = fbError?.message || error.message;
+      console.error('[FacebookApiService.uploadAdImage] Error response', {
+        code: errorCode,
+        message: errorMessage,
+        type: fbError?.type,
+        errorSubcode: fbError?.error_subcode,
+        raw: error.response?.data,
+      });
       
       // Error code 3 usually means permission issue or invalid endpoint
       if (errorCode === 3) {
