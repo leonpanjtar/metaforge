@@ -8,7 +8,7 @@ import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
 export const getAuthUrl = (req: AuthRequest, res: Response): void => {
   const appId = process.env.FACEBOOK_APP_ID;
   const redirectUri = process.env.FACEBOOK_REDIRECT_URI;
-  const scopes = 'ads_management,ads_read';
+  const scopes = 'ads_management,ads_read,pages_show_list';
 
   if (!appId || !redirectUri) {
     res.status(500).json({ error: 'Facebook app configuration missing' });
