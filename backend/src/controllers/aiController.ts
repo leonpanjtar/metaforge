@@ -407,11 +407,16 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
     
     if (!imageHash) {
       // Construct image URL
-      const apiUrl = process.env.API_URL || 'http://localhost:3001';
-      const imageUrl = `${apiUrl}${asset.url}`;
+      const baseUrl =
+        process.env.PUBLIC_BASE_URL ||
+        process.env.API_URL ||
+        'http://localhost:3001';
+      const imageUrl = `${baseUrl}${asset.url}`;
       
       // Check if URL is publicly accessible (not localhost)
-      const isLocalhost = imageUrl.includes('localhost') || imageUrl.includes('127.0.0.1');
+      const isLocalhost =
+        imageUrl.includes('localhost') ||
+        imageUrl.includes('127.0.0.1');
       
       if (isLocalhost) {
         // For localhost, we can't upload to Facebook, but we can still proceed
