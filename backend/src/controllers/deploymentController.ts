@@ -50,17 +50,10 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
     let facebookAdsetId = adset.facebookAdsetId;
     if (!facebookAdsetId) {
           // Build comprehensive adset data with all settings
+          // Note: If campaign has budget, adsets don't need their own budget
+          // Facebook will use campaign-level budget if adset budget is not provided
           const dailyBudget = (adset.dailyBudget || adset.budget || 0) * 100; // Convert to cents
           const lifetimeBudget = adset.lifetimeBudget ? adset.lifetimeBudget * 100 : undefined;
-          
-          // Validate budget - Facebook requires at least one budget type
-          if (dailyBudget <= 0 && !lifetimeBudget) {
-            res.status(400).json({
-              error: 'Invalid budget',
-              details: 'Adset must have either a daily budget or lifetime budget greater than 0',
-            });
-            return;
-          }
 
           // Build targeting object
           const targeting: any = {
@@ -100,11 +93,15 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           };
 
           // Add budget (daily or lifetime, but not both)
+          // Only add adset-level budget if it exists and campaign doesn't have budget
+          // If campaign has budget, adsets inherit it and don't need their own
           if (lifetimeBudget) {
             adsetData.lifetime_budget = lifetimeBudget;
           } else if (dailyBudget > 0) {
             adsetData.daily_budget = dailyBudget;
           }
+          // If neither adset budget exists and campaign has budget, don't include budget field
+          // Facebook will use campaign-level budget
 
           // Add optimization and conversion settings
           if (adset.optimizationGoal) {
