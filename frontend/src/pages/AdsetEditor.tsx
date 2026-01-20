@@ -111,6 +111,14 @@ const AdsetEditor = () => {
   const [variantCount, setVariantCount] = useState(3);
   const [variantPrompt, setVariantPrompt] = useState('');
   const [variantProvider, setVariantProvider] = useState<'meta' | 'openai'>('openai');
+  
+  // Text-to-image generation state
+  const [textToImagePrompt, setTextToImagePrompt] = useState('');
+  const [textToImageCount, setTextToImageCount] = useState(1);
+  const [generatingFromPrompt, setGeneratingFromPrompt] = useState(false);
+  
+  // Asset preview state
+  const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
 
   // Fetch adset
   const { data: adset } = useQuery<Adset>({
@@ -348,6 +356,17 @@ const AdsetEditor = () => {
       const response = await api.post('/ai/generate-image-variations-openai', data, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+    },
+  });
+
+  // Generate image from prompt mutation
+  const generateImageFromPromptMutation = useMutation({
+    mutationFn: async (data: { adsetId: string; prompt: string; count: number }) => {
+      const response = await api.post('/ai/generate-image-from-prompt', data);
       return response.data;
     },
     onSuccess: () => {
@@ -1179,90 +1198,179 @@ const AdsetEditor = () => {
           {/* Generated Assets Tab */}
           {activeTab === 'generated-assets' && (
             <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">Assets</h2>
-                <button
-                  onClick={() => navigate(`/creative/${adsetId}`)}
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                >
-                  Generate AI Variants
-                </button>
+              {/* Base Assets Section */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-xl font-semibold mb-4">Base Assets</h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  Upload your base images and videos. These can be used to generate variants.
+                </p>
+                <FileUpload adsetId={adsetId || ''} onUploadComplete={() => refetchAssets()} />
               </div>
 
-              {assets && assets.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {assets.map((asset) => (
-                    <div key={asset._id} className="relative group">
-                      {asset.type === 'image' ? (
-                        <img
-                          src={`${API_URL}${asset.url}`}
-                          alt={asset.filename}
-                          className="w-full h-32 object-cover rounded-lg border-2 border-gray-200 group-hover:border-blue-500 transition-all"
-                        />
-                      ) : (
-                        <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-gray-200">
-                          <span className="text-gray-500 text-sm">Video</span>
-                        </div>
-                      )}
-                      <p className="mt-1 text-xs text-gray-600 truncate" title={asset.filename}>
-                        {asset.filename}
-                      </p>
-                      {asset.type === 'image' && (
-                        <div className="mt-2 flex gap-2 items-center">
-                          <input
-                            type="number"
-                            min="1"
-                            max="10"
-                            value={assetVariantCounts[asset._id] || 3}
-                            onChange={(e) => {
-                              const count = parseInt(e.target.value) || 3;
-                              setAssetVariantCounts(prev => ({ ...prev, [asset._id]: count }));
-                            }}
-                            className="w-16 px-2 py-1 text-xs rounded border-gray-300 focus:border-blue-500 focus:ring-blue-500"
-                            placeholder="3"
-                          />
-                          <button
-                            onClick={() => handleGenerateVariantsForAsset(asset._id)}
-                            disabled={generatingForAsset === asset._id}
-                            className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                            title="Generate AI variants"
-                          >
-                            {generatingForAsset === asset._id ? 'Generating...' : 'Generate'}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteAsset(asset._id)}
-                            disabled={deleteAssetMutation.isPending}
-                            className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center disabled:opacity-50"
-                            title="Delete asset"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                      {asset.type === 'video' && (
-                        <div className="mt-2 flex justify-end">
-                          <button
-                            onClick={() => handleDeleteAsset(asset._id)}
-                            disabled={deleteAssetMutation.isPending}
-                            className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center disabled:opacity-50"
-                            title="Delete asset"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
+              {/* Generate Assets Section */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-xl font-semibold mb-4">Generate Assets</h2>
+                
+                {/* Text-to-Image Generation */}
+                <div className="mb-6 pb-6 border-b">
+                  <h3 className="text-lg font-medium text-gray-900 mb-3">Generate from Prompt</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Image Prompt
+                      </label>
+                      <textarea
+                        value={textToImagePrompt}
+                        onChange={(e) => setTextToImagePrompt(e.target.value)}
+                        rows={3}
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        placeholder="Describe the image you want to generate (e.g., 'A modern office space with natural lighting, minimalist design, professional atmosphere')"
+                      />
                     </div>
-                  ))}
+                    <div className="flex gap-4 items-end">
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Number of Images
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={textToImageCount}
+                          onChange={(e) => setTextToImageCount(parseInt(e.target.value) || 1)}
+                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        />
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!textToImagePrompt.trim() || !adsetId) return;
+                          setGeneratingFromPrompt(true);
+                          try {
+                            const result = await generateImageFromPromptMutation.mutateAsync({
+                              adsetId,
+                              prompt: textToImagePrompt,
+                              count: textToImageCount,
+                            });
+                            alert(`Successfully generated ${result.count} image(s)!`);
+                            setTextToImagePrompt('');
+                            setTextToImageCount(1);
+                          } catch (error: any) {
+                            alert(error.response?.data?.error || 'Failed to generate images');
+                          } finally {
+                            setGeneratingFromPrompt(false);
+                          }
+                        }}
+                        disabled={generatingFromPrompt || !textToImagePrompt.trim()}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {generatingFromPrompt ? 'Generating...' : 'Generate Images'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>No assets uploaded yet. Upload images or videos to get started.</p>
+
+                {/* Generate Variants from Existing Assets */}
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-3">Generate Variants from Existing Assets</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Select an existing asset (base or generated) to create AI variations.
+                  </p>
+                  {assets && assets.length > 0 ? (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                      {assets.map((asset) => (
+                        asset.type === 'image' ? (
+                          <div key={asset._id} className="relative group">
+                            <div
+                              className="cursor-pointer"
+                              onClick={() => setPreviewAsset(asset)}
+                            >
+                              <img
+                                src={`${API_URL}${asset.url}`}
+                                alt={asset.filename}
+                                className="w-full h-32 object-cover rounded-lg border-2 border-gray-200 group-hover:border-blue-500 transition-all"
+                              />
+                              <div className="absolute top-0 left-0 right-0 bottom-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity rounded-lg flex items-center justify-center">
+                                <span className="opacity-0 group-hover:opacity-100 text-white text-xs">Click to preview</span>
+                              </div>
+                            </div>
+                            <p className="mt-1 text-xs text-gray-600 truncate" title={asset.filename}>
+                              {asset.filename}
+                            </p>
+                            <button
+                              onClick={() => {
+                                setSelectedAssetForVariants(asset);
+                                setVariantCount(assetVariantCounts[asset._id] || 3);
+                                setVariantPrompt('');
+                                setShowVariantGenerator(true);
+                              }}
+                              disabled={generatingForAsset === asset._id}
+                              className="mt-2 w-full px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                              title="Generate variants"
+                            >
+                              Generate Variants
+                            </button>
+                          </div>
+                        ) : null
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No assets available. Upload base assets first.</p>
+                  )}
                 </div>
-              )}
+              </div>
+
+              {/* All Assets Section */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-xl font-semibold mb-4">All Assets ({assets?.length || 0})</h2>
+                {assets && assets.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {assets.map((asset) => (
+                      <div key={asset._id} className="relative group">
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => setPreviewAsset(asset)}
+                        >
+                          {asset.type === 'image' ? (
+                            <img
+                              src={`${API_URL}${asset.url}`}
+                              alt={asset.filename}
+                              className="w-full h-32 object-cover rounded-lg border-2 border-gray-200 group-hover:border-blue-500 transition-all"
+                            />
+                          ) : (
+                            <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-gray-200">
+                              <span className="text-gray-500 text-sm">Video</span>
+                            </div>
+                          )}
+                          <div className="absolute top-0 left-0 right-0 bottom-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity rounded-lg flex items-center justify-center">
+                            <span className="opacity-0 group-hover:opacity-100 text-white text-xs">Click to preview</span>
+                          </div>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-600 truncate" title={asset.filename}>
+                          {asset.filename}
+                        </p>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteAsset(asset._id);
+                          }}
+                          disabled={deleteAssetMutation.isPending}
+                          className="mt-2 w-full px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center gap-1 disabled:opacity-50"
+                          title="Delete asset"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No assets yet. Upload base assets or generate new ones above.</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1526,6 +1634,97 @@ const AdsetEditor = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Asset Preview Modal */}
+      {previewAsset && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          onClick={() => setPreviewAsset(null)}
+        >
+          <div
+            className="bg-white rounded-lg max-w-7xl w-full relative flex flex-col"
+            style={{ maxHeight: '80vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-xl font-bold text-gray-900">
+                {previewAsset.filename}
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (previewAsset.type === 'image') {
+                      setSelectedAssetForVariants(previewAsset);
+                      setVariantCount(assetVariantCounts[previewAsset._id] || 3);
+                      setVariantPrompt('');
+                      setShowVariantGenerator(true);
+                      setPreviewAsset(null);
+                    }
+                  }}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                >
+                  Generate Variants
+                </button>
+                <button
+                  onClick={() => {
+                    handleDeleteAsset(previewAsset._id);
+                    setPreviewAsset(null);
+                  }}
+                  disabled={deleteAssetMutation.isPending}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setPreviewAsset(null)}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-100">
+              {previewAsset.type === 'image' ? (
+                <img
+                  src={`${API_URL}${previewAsset.url}`}
+                  alt={previewAsset.filename}
+                  className="h-full w-auto max-w-full object-contain"
+                  style={{ maxHeight: 'calc(80vh - 120px)' }}
+                />
+              ) : (
+                <div className="text-center text-gray-500">
+                  <p>Video preview not available</p>
+                  <p className="text-sm mt-2">{previewAsset.filename}</p>
+                </div>
+              )}
+            </div>
+            {previewAsset.metadata && (
+              <div className="p-4 border-t bg-gray-50 text-sm text-gray-600">
+                <div className="grid grid-cols-3 gap-4">
+                  {previewAsset.metadata.width && previewAsset.metadata.height && (
+                    <div>
+                      <span className="font-medium">Dimensions: </span>
+                      {previewAsset.metadata.width} × {previewAsset.metadata.height}
+                    </div>
+                  )}
+                  {previewAsset.metadata.size && (
+                    <div>
+                      <span className="font-medium">Size: </span>
+                      {(previewAsset.metadata.size / 1024).toFixed(2)} KB
+                    </div>
+                  )}
+                  {previewAsset.metadata.mimeType && (
+                    <div>
+                      <span className="font-medium">Type: </span>
+                      {previewAsset.metadata.mimeType}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
