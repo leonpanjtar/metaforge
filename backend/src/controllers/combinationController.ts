@@ -158,7 +158,7 @@ export const generateCombinations = async (
 export const getCombinations = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { adsetId } = req.params;
-    const { sortBy = 'overallScore', limit = 100 } = req.query;
+    const { sortBy = 'overallScore', limit } = req.query;
 
     const adset = await Adset.findOne({
       _id: adsetId,
@@ -177,15 +177,21 @@ export const getCombinations = async (req: AuthRequest, res: Response): Promise<
       sortOptions.predictedCTR = -1;
     }
 
-    const combinations = await AdCombination.find({ adsetId })
+    let query = AdCombination.find({ adsetId })
       .populate('assetIds')
       .populate('headlineId')
       .populate('hookId')
       .populate('bodyId')
       .populate('descriptionId')
       .populate('ctaId')
-      .sort(sortOptions)
-      .limit(parseInt(limit as string));
+      .sort(sortOptions);
+
+    // Only apply limit if explicitly provided
+    if (limit) {
+      query = query.limit(parseInt(limit as string));
+    }
+
+    const combinations = await query;
 
     res.json(combinations);
   } catch (error: any) {
