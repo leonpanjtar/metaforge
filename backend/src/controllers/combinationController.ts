@@ -4,14 +4,10 @@ import { Adset } from '../models/Adset';
 import { Asset } from '../models/Asset';
 import { AdCopy } from '../models/AdCopy';
 import { AdCombination } from '../models/AdCombination';
-import { ScoringService } from '../services/ai/ScoringService';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { Campaign } from '../models/Campaign';
 import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
-
-// Lazy initialization - only create when needed
-const getScoringService = () => new ScoringService();
 
 export const generateCombinations = async (
   req: AuthRequest,
@@ -97,9 +93,9 @@ export const generateCombinations = async (
     // Delete existing combinations for this adset
     await AdCombination.deleteMany({ adsetId });
 
-    // Generate all combinations
-    const combinations = [];
-    const scoringService = getScoringService();
+    // Generate all combinations (without scoring for speed)
+    // Scoring can be done asynchronously later if needed
+    const combinationDocs = [];
 
     for (const asset of assets) {
       for (const headline of headlines) {
@@ -113,39 +109,30 @@ export const generateCombinations = async (
               for (const hook of hookList) {
                 // For each CTA button type, create a combination
                 for (const ctaType of ctaTypes) {
-                  try {
-                    // Score the combination
-                    const scoring = await scoringService.scoreCombination(
-                      asset,
-                      headline,
-                      body,
-                      description,
-                      cta,
-                      adset
-                    );
+                  // Create combination with default scores (scoring can be done later)
+                  const combination = new AdCombination({
+                    adsetId,
+                    assetIds: [asset._id],
+                    headlineId: headline._id,
+                    hookId: hook?._id,
+                    bodyId: body._id,
+                    descriptionId: description._id,
+                    ctaId: cta._id,
+                    ctaType: ctaType,
+                    url: landingPageUrl,
+                    scores: {
+                      hook: 0,
+                      alignment: 0,
+                      fit: 0,
+                      clarity: 0,
+                      match: 0,
+                    },
+                    overallScore: 0,
+                    predictedCTR: 0,
+                    deployedToFacebook: false,
+                  });
 
-                    const combination = new AdCombination({
-                      adsetId,
-                      assetIds: [asset._id],
-                      headlineId: headline._id,
-                      hookId: hook?._id,
-                      bodyId: body._id,
-                      descriptionId: description._id,
-                      ctaId: cta._id,
-                      ctaType: ctaType, // Use selected CTA button type
-                      url: landingPageUrl,
-                      scores: scoring.scores,
-                      overallScore: scoring.overallScore,
-                      predictedCTR: scoring.predictedCTR,
-                      deployedToFacebook: false,
-                    });
-
-                    await combination.save();
-                    combinations.push(combination);
-                  } catch (error: any) {
-                    console.error(`Error creating combination:`, error);
-                    // Continue with next combination
-                  }
+                  combinationDocs.push(combination);
                 }
               }
             }
@@ -153,6 +140,13 @@ export const generateCombinations = async (
         }
       }
     }
+
+    // Bulk insert all combinations at once (much faster)
+    if (combinationDocs.length > 0) {
+      await AdCombination.insertMany(combinationDocs);
+    }
+
+    const combinations = combinationDocs;
 
     res.json({
       success: true,
