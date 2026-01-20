@@ -96,7 +96,7 @@ export const generateSingleImageVariation = async (req: AuthRequest, res: Respon
     // Save file locally first
     const { FileStorageService } = await import('../services/storage/FileStorageService');
     const fileStorage = new FileStorageService();
-    const savedFile = await fileStorage.saveFile(file, 'images');
+    const savedFile = await fileStorage.saveFile(file, adsetId.toString());
 
     // Try to upload to Facebook to get image hash for preview generation
     let imageHash: string | null = null;
@@ -194,7 +194,7 @@ export const generateImageVariations = async (req: AuthRequest, res: Response): 
     // at ad creation time, not during image upload
     const { FileStorageService } = await import('../services/storage/FileStorageService');
     const fileStorage = new FileStorageService();
-    const savedFile = await fileStorage.saveFile(file, 'images');
+    const savedFile = await fileStorage.saveFile(file, adsetId.toString());
 
     // Save original image as asset
     const { Asset } = await import('../models/Asset');

@@ -17,7 +17,7 @@ export const getAuthUrl = (req: AuthRequest, res: Response): void => {
 
   // Include user ID in state parameter so we know which user is connecting
   const state = Buffer.from(req.userId || '').toString('base64');
-  const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&state=${state}`;
+  const authUrl = `https://www.facebook.com/v24.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&state=${state}`;
 
   res.json({ authUrl });
 };
@@ -61,7 +61,7 @@ export const handleCallback = async (
 
     // Exchange code for access token
     const tokenResponse = await fetch(
-      `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`
+      `https://graph.facebook.com/v24.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`
     );
 
     const tokenData = await tokenResponse.json() as { 

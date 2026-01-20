@@ -22,7 +22,7 @@ export interface FacebookAdset {
 export class FacebookApiService {
   private api: AxiosInstance;
   private accessToken: string;
-  private apiVersion = 'v18.0';
+  private apiVersion = 'v24.0';
 
   constructor(accessToken: string) {
     this.accessToken = accessToken;
@@ -187,14 +187,32 @@ export class FacebookApiService {
         accountId,
         imageUrl,
       });
-      // Method 1: Try URL-based upload (simplest)
-      const response = await this.api.post(`/${accountId}/adimages`, {
-        url: imageUrl,
+      
+      // Fetch the image from the URL and convert to base64 (API v24.0 requires bytes parameter)
+      console.log('[FacebookApiService.uploadAdImage] Fetching image from URL...');
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000, // 30 second timeout
       });
+      
+      const imageBuffer = Buffer.from(imageResponse.data);
+      const base64Image = imageBuffer.toString('base64');
+      
+      console.log('[FacebookApiService.uploadAdImage] Image fetched, size:', imageBuffer.length, 'bytes');
+      
+      // Upload using bytes parameter (API v24.0)
+      const response = await this.api.post(`/${accountId}/adimages`, {
+        bytes: base64Image,
+      });
+      
       console.log('[FacebookApiService.uploadAdImage] Response data', response.data);
       
-      if (response.data.images && response.data.images[0]) {
-        return response.data.images[0].hash;
+      // Response format: { images: { <hash>: { hash: "...", url: "...", ... } } }
+      if (response.data.images) {
+        const imageEntries = Object.values(response.data.images) as any[];
+        if (imageEntries.length > 0 && imageEntries[0].hash) {
+          return imageEntries[0].hash;
+        }
       }
       
       throw new Error('No image hash returned from Facebook');

@@ -29,7 +29,7 @@ export class TokenRefreshService {
       const appSecret = process.env.FACEBOOK_APP_SECRET;
       
       const response = await fetch(
-        `https://graph.facebook.com/v18.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${account.accessToken}`
+        `https://graph.facebook.com/v24.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${account.accessToken}`
       );
       
       const data = await response.json();
