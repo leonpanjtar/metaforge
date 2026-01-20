@@ -219,14 +219,21 @@ const AdsetEditor = () => {
       await api.put(`/ad-copies/${copyId}`, { content });
     },
     onSuccess: (_data, variables) => {
-      // Update local state silently - remove from edited content since it's now saved
+      // Update the query cache directly without refetching to prevent UI flicker
+      queryClient.setQueryData(['ad-copies', adsetId], (oldData: any) => {
+        if (!oldData) return oldData;
+        return oldData.map((copy: any) => 
+          copy._id === variables.copyId 
+            ? { ...copy, content: variables.content }
+            : copy
+        );
+      });
+      // Remove from edited content since it's now saved and in cache
       setEditedCopyContent(prev => {
         const next = { ...prev };
         delete next[variables.copyId];
         return next;
       });
-      // Silently invalidate to refresh the list in background
-      queryClient.invalidateQueries({ queryKey: ['ad-copies', adsetId] });
     },
     onError: (_error: any) => {
       // Silent error - could add toast notification here if needed
@@ -1314,11 +1321,26 @@ const AdsetEditor = () => {
                               >
                                 <div className="flex items-start gap-2">
                                   <textarea
+                                    key={`textarea-${copy._id}`}
                                     value={displayContent}
                                     onChange={(e) => {
-                                      e.target.style.height = 'auto';
-                                      e.target.style.height = `${Math.min(e.target.scrollHeight, parseInt(maxHeight))}px`;
-                                      handleCopyContentChange(copy._id, e.target.value);
+                                      const target = e.target;
+                                      // Preserve cursor position before any state updates
+                                      const cursorPosition = target.selectionStart;
+                                      const scrollTop = target.scrollTop;
+                                      
+                                      // Update height
+                                      target.style.height = 'auto';
+                                      target.style.height = `${Math.min(target.scrollHeight, parseInt(maxHeight))}px`;
+                                      
+                                      // Handle content change (this updates state)
+                                      handleCopyContentChange(copy._id, target.value);
+                                      
+                                      // Restore cursor position and scroll after React re-render
+                                      requestAnimationFrame(() => {
+                                        target.setSelectionRange(cursorPosition, cursorPosition);
+                                        target.scrollTop = scrollTop;
+                                      });
                                     }}
                                     onInput={(e) => {
                                       const target = e.target as HTMLTextAreaElement;
