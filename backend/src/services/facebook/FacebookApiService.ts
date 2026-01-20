@@ -176,7 +176,18 @@ export class FacebookApiService {
         adsetData: JSON.stringify(adsetData, null, 2),
       });
       const response = await this.api.post(`/${accountId}/adsets`, adsetData);
-      return response.data.id;
+      const adsetId = response.data.id;
+      console.log('[FacebookApiService.createAdset] Success:', {
+        adsetId,
+        response: response.data,
+      });
+      
+      // Verify the adset was created successfully
+      if (!adsetId) {
+        throw new Error('Adset creation succeeded but no ID was returned');
+      }
+      
+      return adsetId;
     } catch (error: any) {
       const fbError = error.response?.data?.error;
       console.error('[FacebookApiService.createAdset] Error:', {
@@ -271,11 +282,25 @@ export class FacebookApiService {
 
   async createAd(adsetId: string, adData: any): Promise<string> {
     try {
+      console.log('[FacebookApiService.createAd] Request:', {
+        adsetId,
+        adData: JSON.stringify(adData, null, 2),
+      });
       const response = await this.api.post(`/${adsetId}/ads`, adData);
       return response.data.id;
     } catch (error: any) {
+      const fbError = error.response?.data?.error;
+      console.error('[FacebookApiService.createAd] Error:', {
+        adsetId,
+        message: fbError?.message || error.message,
+        code: fbError?.code,
+        type: fbError?.type,
+        errorSubcode: fbError?.error_subcode,
+        fullError: fbError,
+        requestData: adData,
+      });
       throw new Error(
-        `Failed to create ad: ${error.response?.data?.error?.message || error.message}`
+        `Failed to create ad: ${fbError?.message || error.message}`
       );
     }
   }

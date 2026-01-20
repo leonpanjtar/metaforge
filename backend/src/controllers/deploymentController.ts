@@ -48,6 +48,20 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
 
     // Create adset if not exists on Facebook (do this ONCE before the loop)
     let facebookAdsetId = adset.facebookAdsetId;
+    
+    // Verify adset exists if we have an ID
+    if (facebookAdsetId) {
+      try {
+        await apiService.getAdsetDetails(facebookAdsetId);
+        console.log(`[deployAds] Verified existing adset ID: ${facebookAdsetId}`);
+      } catch (error: any) {
+        console.warn(`[deployAds] Adset ${facebookAdsetId} not found or inaccessible, will recreate:`, error.message);
+        facebookAdsetId = undefined; // Reset to trigger recreation
+        adset.facebookAdsetId = undefined;
+        await adset.save();
+      }
+    }
+    
     if (!facebookAdsetId) {
           // Build comprehensive adset data with all settings
           // Note: If campaign has budget, adsets don't need their own budget
@@ -153,8 +167,18 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           `act_${facebookAccount.accountId}`,
           adsetData
         );
-        adset.facebookAdsetId = facebookAdsetId;
-        await adset.save();
+        console.log(`[deployAds] Created adset with ID: ${facebookAdsetId}`);
+        
+        // Verify the adset exists before saving
+        try {
+          await apiService.getAdsetDetails(facebookAdsetId);
+          adset.facebookAdsetId = facebookAdsetId;
+          await adset.save();
+          console.log(`[deployAds] Verified and saved adset ID: ${facebookAdsetId}`);
+        } catch (verifyError: any) {
+          console.error(`[deployAds] Failed to verify created adset ${facebookAdsetId}:`, verifyError);
+          throw new Error(`Adset was created but cannot be accessed: ${verifyError.message}`);
+        }
       } catch (error: any) {
         console.error('Failed to create adset:', error);
         res.status(400).json({
@@ -164,6 +188,17 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         });
         return;
       }
+    } else {
+      console.log(`[deployAds] Using existing adset ID: ${facebookAdsetId}`);
+    }
+    
+    // Final verification that we have a valid adset ID before creating ads
+    if (!facebookAdsetId) {
+      res.status(400).json({
+        error: 'No valid adset ID available',
+        details: 'Failed to create or verify adset',
+      });
+      return;
     }
 
     const deployedAds = [];
@@ -270,10 +305,12 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
 
         // Create ad
         try {
+          console.log(`[deployAds] Creating ad for combination ${combinationId} in adset ${facebookAdsetId}`);
           const facebookAdId = await apiService.createAd(facebookAdsetId, {
             ...creativeSpec,
             status,
           });
+          console.log(`[deployAds] Successfully created ad ${facebookAdId} for combination ${combinationId}`);
 
           combination.deployedToFacebook = true;
           combination.facebookAdId = facebookAdId;
