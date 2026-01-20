@@ -351,9 +351,9 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
         try {
           console.log(`[CreativeGenerator] Generating variation ${i + 1}/${variationPrompts.length}...`);
           
-          // Use Responses API with gpt-image-1 model
-          // Note: If responses.create is not available, fallback to images.generate with dall-e-3
+          // Use Responses API with gpt-image-1 model, with fallback to DALL-E 3
           let base64Image: string | null = null;
+          let useDalle3Fallback = false;
           
           try {
             // Try using responses API (for gpt-image-1)
@@ -377,7 +377,6 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
               }
             } else {
               // Fallback: Use images.generate API directly (if responses API not available)
-              // This might require a different approach - using direct HTTP call
               throw new Error('responses.create not available in SDK');
             }
           } catch (apiError: any) {
@@ -410,7 +409,55 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
                 base64Image = imageOutputs[0];
               }
             } catch (httpError: any) {
-              throw new Error(`Failed to call gpt-image-1 API: ${httpError.message}`);
+              const errorDetails = httpError.response?.data || httpError.message;
+              const errorStatus = httpError.response?.status;
+              
+              console.error('[CreativeGenerator] gpt-image-1 API error details:', {
+                status: errorStatus,
+                statusText: httpError.response?.statusText,
+                data: JSON.stringify(httpError.response?.data, null, 2),
+                message: httpError.message,
+                url: 'https://api.openai.com/v1/responses'
+              });
+              
+              // If 400/404 error or API not available, mark for DALL-E 3 fallback
+              if (errorStatus === 400 || errorStatus === 404 || errorStatus === 422) {
+                console.log(`[CreativeGenerator] gpt-image-1 API returned ${errorStatus}, falling back to DALL-E 3...`);
+                console.log(`[CreativeGenerator] Error details: ${JSON.stringify(httpError.response?.data, null, 2)}`);
+                useDalle3Fallback = true;
+              } else {
+                // For other errors, still try DALL-E 3 as fallback
+                console.log(`[CreativeGenerator] gpt-image-1 API error (${errorStatus}), will try DALL-E 3 fallback...`);
+                useDalle3Fallback = true;
+              }
+            }
+          }
+          
+          // Fallback to DALL-E 3 if gpt-image-1 fails or is not available
+          if (!base64Image || useDalle3Fallback) {
+            try {
+              console.log(`[CreativeGenerator] Using DALL-E 3 for variation ${i + 1}...`);
+              const dalleResponse = await this.getClient().images.generate({
+                model: 'dall-e-3',
+                prompt: variationPrompts[i],
+                n: 1,
+                size: size,
+                quality: 'hd',
+                response_format: 'url',
+              });
+
+              if (dalleResponse.data?.[0]?.url) {
+                // Convert URL to base64 for consistency
+                const axios = require('axios');
+                const imageResponse = await axios.get(dalleResponse.data[0].url, {
+                  responseType: 'arraybuffer',
+                });
+                const buffer = Buffer.from(imageResponse.data, 'binary');
+                base64Image = buffer.toString('base64');
+                console.log(`[CreativeGenerator] DALL-E 3 successful for variation ${i + 1}`);
+              }
+            } catch (dalleError: any) {
+              throw new Error(`Both gpt-image-1 and DALL-E 3 failed. DALL-E 3 error: ${dalleError.message}`);
             }
           }
 
