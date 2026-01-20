@@ -339,3 +339,77 @@ export const previewCombination = async (
   }
 };
 
+export const deleteCombination = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const { adsetId, combinationId } = req.params;
+
+    const adset = await Adset.findOne({
+      _id: adsetId,
+      userId: req.userId,
+    });
+
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    const combination = await AdCombination.findOne({
+      _id: combinationId,
+      adsetId,
+    });
+
+    if (!combination) {
+      res.status(404).json({ error: 'Combination not found' });
+      return;
+    }
+
+    await AdCombination.findByIdAndDelete(combinationId);
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Delete combination error:', error);
+    res.status(500).json({ error: 'Failed to delete combination' });
+  }
+};
+
+export const deleteCombinationsBulk = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const { adsetId } = req.params;
+    const { combinationIds } = req.body;
+
+    if (!Array.isArray(combinationIds) || combinationIds.length === 0) {
+      res.status(400).json({ error: 'combinationIds must be a non-empty array' });
+      return;
+    }
+
+    const adset = await Adset.findOne({
+      _id: adsetId,
+      userId: req.userId,
+    });
+
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    const result = await AdCombination.deleteMany({
+      _id: { $in: combinationIds },
+      adsetId,
+    });
+
+    res.json({ 
+      success: true,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error: any) {
+    console.error('Delete combinations bulk error:', error);
+    res.status(500).json({ error: 'Failed to delete combinations' });
+  }
+};
+

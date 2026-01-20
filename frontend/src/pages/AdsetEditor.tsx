@@ -350,6 +350,30 @@ const AdsetEditor = () => {
     },
   });
 
+  // Delete combination mutation
+  const deleteCombinationMutation = useMutation({
+    mutationFn: async (combinationId: string) => {
+      if (!adsetId) throw new Error('Adset ID is required');
+      await api.delete(`/combinations/${adsetId}/${combinationId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['combinations', adsetId] });
+    },
+  });
+
+  // Bulk delete combinations mutation
+  const deleteCombinationsBulkMutation = useMutation({
+    mutationFn: async (combinationIds: string[]) => {
+      await api.delete(`/combinations/bulk/${adsetId}`, {
+        data: { combinationIds },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['combinations', adsetId] });
+      setSelectedCombinations(new Set());
+    },
+  });
+
   // Delete asset mutation
   const deleteAssetMutation = useMutation({
     mutationFn: async (assetId: string) => {
@@ -716,6 +740,29 @@ const AdsetEditor = () => {
       combinationIds,
       status,
     });
+  };
+
+  const handleDeleteCombination = async (combinationId: string) => {
+    if (confirm('Are you sure you want to delete this combination?')) {
+      await deleteCombinationMutation.mutateAsync(combinationId);
+      // Remove from selected combinations
+      setSelectedCombinations(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(combinationId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleDeleteCombinationsBulk = async () => {
+    const selectedIds = Array.from(selectedCombinations);
+    if (selectedIds.length === 0) {
+      alert('Please select at least one combination to delete');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} combination(s)?`)) {
+      await deleteCombinationsBulkMutation.mutateAsync(selectedIds);
+    }
   };
 
   const campaignName = adset && 'campaignId' in adset && adset.campaignId && typeof adset.campaignId === 'object' 
@@ -1776,6 +1823,13 @@ const AdsetEditor = () => {
                       >
                         Deselect All
                       </button>
+                      <button
+                        onClick={handleDeleteCombinationsBulk}
+                        disabled={deleteCombinationsBulkMutation.isPending || selectedCombinations.size === 0}
+                        className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {deleteCombinationsBulkMutation.isPending ? 'Deleting...' : `Delete Selected (${selectedCombinations.size})`}
+                      </button>
                       <select
                         id="deploy-status"
                         className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -1901,6 +1955,16 @@ const AdsetEditor = () => {
                               className="flex-1 px-3 py-2 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                             >
                               {loadingPreview && previewingCombination?._id === combination._id ? 'Loading...' : 'Preview'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCombination(combination._id)}
+                              disabled={deleteCombinationMutation.isPending}
+                              className="px-3 py-2 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                              title="Delete combination"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
                             </button>
                           </div>
 

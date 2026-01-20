@@ -4,6 +4,7 @@ import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 import { Asset } from '../models/Asset';
 import { Adset } from '../models/Adset';
+import { AdCombination } from '../models/AdCombination';
 import { FileStorageService } from '../services/storage/FileStorageService';
 // @ts-ignore - image-size doesn't have TypeScript types
 import sizeOf from 'image-size';
@@ -147,10 +148,23 @@ export const deleteAsset = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
+    // Delete all combinations that reference this asset
+    const deletedCombinations = await AdCombination.deleteMany({
+      assetIds: id,
+    });
+
+    console.log(`[deleteAsset] Deleted ${deletedCombinations.deletedCount} combination(s) referencing asset ${id}`);
+
+    // Delete the asset file from filesystem
     await fileStorageService.deleteFile(asset.filepath);
+    
+    // Delete the asset from database
     await Asset.findByIdAndDelete(id);
 
-    res.json({ success: true });
+    res.json({ 
+      success: true,
+      deletedCombinations: deletedCombinations.deletedCount,
+    });
   } catch (error: any) {
     console.error('Delete asset error:', error);
     res.status(500).json({ error: 'Failed to delete asset' });
