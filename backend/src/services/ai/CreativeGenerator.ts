@@ -345,25 +345,82 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
       const imageUrls: string[] = [];
       const errors: string[] = [];
       
-      console.log(`[CreativeGenerator] Generating ${variationPrompts.length} variations with DALL-E 3...`);
+      console.log(`[CreativeGenerator] Generating ${variationPrompts.length} variations with gpt-image-1...`);
       
       for (let i = 0; i < variationPrompts.length; i++) {
         try {
           console.log(`[CreativeGenerator] Generating variation ${i + 1}/${variationPrompts.length}...`);
-          const response = await this.getClient().images.generate({
-            model: 'dall-e-3',
-            prompt: variationPrompts[i],
-            n: 1,
-            size: size,
-            quality: 'hd', // High quality
-            response_format: 'url',
-          });
+          
+          // Use Responses API with gpt-image-1 model
+          // Note: If responses.create is not available, fallback to images.generate with dall-e-3
+          let base64Image: string | null = null;
+          
+          try {
+            // Try using responses API (for gpt-image-1)
+            if ((this.getClient() as any).responses?.create) {
+              const response = await (this.getClient() as any).responses.create({
+                model: 'gpt-image-1',
+                input: variationPrompts[i],
+                tools: [{ 
+                  type: 'image_generation',
+                }],
+                tool_choice: { type: 'image_generation' },
+              });
 
-          if (response.data?.[0]?.url) {
-            imageUrls.push(response.data[0].url);
+              // Extract base64 images from the tool outputs
+              const imageOutputs = response.output
+                .filter((output: any) => output.type === 'image_generation_call')
+                .map((output: any) => output.result);
+
+              if (imageOutputs.length > 0 && imageOutputs[0]) {
+                base64Image = imageOutputs[0];
+              }
+            } else {
+              // Fallback: Use images.generate API directly (if responses API not available)
+              // This might require a different approach - using direct HTTP call
+              throw new Error('responses.create not available in SDK');
+            }
+          } catch (apiError: any) {
+            // If responses API fails or doesn't exist, try direct HTTP call
+            console.log(`[CreativeGenerator] Trying direct API call for gpt-image-1...`);
+            try {
+              const axios = require('axios');
+              const apiKey = process.env.OPENAI_API_KEY;
+              const apiResponse = await axios.post(
+                'https://api.openai.com/v1/responses',
+                {
+                  model: 'gpt-image-1',
+                  input: variationPrompts[i],
+                  tools: [{ type: 'image_generation' }],
+                  tool_choice: { type: 'image_generation' },
+                },
+                {
+                  headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                }
+              );
+
+              const imageOutputs = apiResponse.data.output
+                .filter((output: any) => output.type === 'image_generation_call')
+                .map((output: any) => output.result);
+
+              if (imageOutputs.length > 0 && imageOutputs[0]) {
+                base64Image = imageOutputs[0];
+              }
+            } catch (httpError: any) {
+              throw new Error(`Failed to call gpt-image-1 API: ${httpError.message}`);
+            }
+          }
+
+          if (base64Image) {
+            // Convert base64 to data URL for consistency with existing download logic
+            const dataUrl = `data:image/png;base64,${base64Image}`;
+            imageUrls.push(dataUrl);
             console.log(`[CreativeGenerator] Variation ${i + 1} generated successfully`);
           } else {
-            const errorMsg = `Variation ${i + 1}: No URL in response`;
+            const errorMsg = `Variation ${i + 1}: No image in response`;
             console.error(`[CreativeGenerator] ${errorMsg}`);
             errors.push(errorMsg);
           }

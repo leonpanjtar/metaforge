@@ -571,10 +571,10 @@ const AssetManager = () => {
                           className="mr-2"
                         />
                         <span className="text-sm">
-                          <strong>OpenAI DALL-E 3</strong> (Recommended)
-                          <span className="block text-xs text-gray-500 mt-1">
-                            High quality, preserves aspect ratio, clear readable text
-                          </span>
+                        <strong>OpenAI gpt-image-1</strong> (Recommended)
+                        <span className="block text-xs text-gray-500 mt-1">
+                          High quality, preserves aspect ratio, clear readable text
+                        </span>
                         </span>
                       </label>
                       <label className="flex items-center">
@@ -640,7 +640,7 @@ const AssetManager = () => {
                   {variantProvider === 'openai' && (
                     <div className="bg-green-50 p-4 rounded-md border border-green-200">
                       <p className="text-sm text-green-800">
-                        <strong>OpenAI DALL-E 3 Features:</strong>
+                        <strong>OpenAI gpt-image-1 Features:</strong>
                         <ul className="list-disc list-inside mt-2 space-y-1">
                           <li>Analyzes your image automatically</li>
                           <li>Preserves original aspect ratio</li>
@@ -737,7 +737,7 @@ const AssetManager = () => {
                   >
                     {generatingVariants 
                       ? `Generating ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI' : 'Meta AI'}...` 
-                      : `Generate ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI DALL-E 3' : 'Meta AI'}`}
+                      : `Generate ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI gpt-image-1' : 'Meta AI'}`}
                   </button>
                 </div>
               ) : (

@@ -227,21 +227,38 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
 
     for (let i = 0; i < result.imageUrls.length; i++) {
       try {
-        const imageUrl = result.imageUrls[i];
-        console.log(`[generateImageVariationsWithOpenAI] Downloading variation ${i + 1}: ${imageUrl}`);
+        const imageData = result.imageUrls[i];
+        console.log(`[generateImageVariationsWithOpenAI] Processing variation ${i + 1}...`);
 
-        // Download image
-        const imageResponse = await axios.get(imageUrl, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-        });
+        let buffer: Buffer;
+        let mimeType = 'image/png';
 
-        const buffer = Buffer.from(imageResponse.data, 'binary');
+        // Handle base64 data URL (from gpt-image-1) or regular URL (fallback)
+        if (imageData.startsWith('data:image/')) {
+          // Base64 data URL from gpt-image-1
+          const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
+          if (matches) {
+            mimeType = `image/${matches[1]}`;
+            const base64Data = matches[2];
+            buffer = Buffer.from(base64Data, 'base64');
+          } else {
+            throw new Error('Invalid base64 data URL format');
+          }
+        } else {
+          // Regular URL (fallback for compatibility)
+          console.log(`[generateImageVariationsWithOpenAI] Downloading from URL: ${imageData}`);
+          const imageResponse = await axios.get(imageData, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+          });
+          buffer = Buffer.from(imageResponse.data, 'binary');
+          mimeType = imageResponse.headers['content-type'] || 'image/png';
+        }
 
         // Get image dimensions
         let metadata: any = {
           size: buffer.length,
-          mimeType: imageResponse.headers['content-type'] || 'image/png',
+          mimeType: mimeType,
         };
 
         try {
@@ -256,9 +273,9 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
         const { filename, filepath, url } = await fileStorageService.saveFileFromBuffer(
           buffer,
           adsetId.toString(),
-          `openai-variation-${i + 1}.png`,
-          imageResponse.headers['content-type'],
-          imageUrl
+          `gpt-image-variation-${i + 1}.png`,
+          mimeType,
+          undefined
         );
 
         // Create asset record
@@ -288,12 +305,13 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
 
     res.json({
       success: true,
-      message: `Generated ${savedAssets.length} image variation(s) using OpenAI DALL-E 3`,
+      message: `Generated ${savedAssets.length} image variation(s) using OpenAI gpt-image-1`,
       assets: savedAssets,
       count: savedAssets.length,
       analysis: result.analysis,
       prompts: result.prompts,
       provider: 'openai',
+      model: 'gpt-image-1',
     });
   } catch (error: any) {
     console.error('Generate image variations with OpenAI error:', error);
