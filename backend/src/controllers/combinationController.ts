@@ -15,6 +15,7 @@ export const generateCombinations = async (
 ): Promise<void> => {
   try {
     const { adsetId } = req.params;
+    // Accept both formats: selectedAssets/assets, selectedHooks/hooks, etc.
     const { 
       selectedAssets = [],
       selectedHooks = [],
@@ -22,8 +23,25 @@ export const generateCombinations = async (
       selectedCTAs = [],
       selectedHeadlines = [],
       selectedDescriptions = [],
-      selectedCTATypes = []
+      selectedCTATypes = [],
+      // Also accept shorter format from frontend
+      assets: assetsPayload = [],
+      hooks: hooksPayload = [],
+      bodies: bodiesPayload = [],
+      ctas: ctasPayload = [],
+      headlines: headlinesPayload = [],
+      descriptions: descriptionsPayload = [],
+      ctaTypes: ctaTypesPayload = []
     } = req.body;
+
+    // Use selected* format if provided, otherwise use shorter format
+    const finalSelectedAssets = selectedAssets.length > 0 ? selectedAssets : assetsPayload;
+    const finalSelectedHooks = selectedHooks.length > 0 ? selectedHooks : hooksPayload;
+    const finalSelectedBodies = selectedBodies.length > 0 ? selectedBodies : bodiesPayload;
+    const finalSelectedCTAs = selectedCTAs.length > 0 ? selectedCTAs : ctasPayload;
+    const finalSelectedHeadlines = selectedHeadlines.length > 0 ? selectedHeadlines : headlinesPayload;
+    const finalSelectedDescriptions = selectedDescriptions.length > 0 ? selectedDescriptions : descriptionsPayload;
+    const finalSelectedCTATypes = selectedCTATypes.length > 0 ? selectedCTATypes : ctaTypesPayload;
 
     const adset = await Adset.findOne({
       _id: adsetId,
@@ -37,64 +55,64 @@ export const generateCombinations = async (
 
     // Fetch ONLY selected components (no fallback to all)
     // Validate that components are selected before fetching
-    if (selectedAssets.length === 0) {
+    if (finalSelectedAssets.length === 0) {
       res.status(400).json({ error: 'Please select at least one asset.' });
       return;
     }
-    if (selectedHeadlines.length === 0) {
+    if (finalSelectedHeadlines.length === 0) {
       res.status(400).json({ error: 'Please select at least one headline.' });
       return;
     }
-    if (selectedBodies.length === 0) {
+    if (finalSelectedBodies.length === 0) {
       res.status(400).json({ error: 'Please select at least one body.' });
       return;
     }
-    if (selectedDescriptions.length === 0) {
+    if (finalSelectedDescriptions.length === 0) {
       res.status(400).json({ error: 'Please select at least one description.' });
       return;
     }
-    if (selectedCTAs.length === 0) {
+    if (finalSelectedCTAs.length === 0) {
       res.status(400).json({ error: 'Please select at least one CTA.' });
       return;
     }
 
     // Fetch only the selected components
-    const assets = await Asset.find({ _id: { $in: selectedAssets }, adsetId });
-    const headlines = await AdCopy.find({ _id: { $in: selectedHeadlines }, adsetId, type: 'headline' });
-    const bodies = await AdCopy.find({ _id: { $in: selectedBodies }, adsetId, type: 'body' });
-    const descriptions = await AdCopy.find({ _id: { $in: selectedDescriptions }, adsetId, type: 'description' });
-    const ctas = await AdCopy.find({ _id: { $in: selectedCTAs }, adsetId, type: 'cta' });
+    const assets = await Asset.find({ _id: { $in: finalSelectedAssets }, adsetId });
+    const headlines = await AdCopy.find({ _id: { $in: finalSelectedHeadlines }, adsetId, type: 'headline' });
+    const bodies = await AdCopy.find({ _id: { $in: finalSelectedBodies }, adsetId, type: 'body' });
+    const descriptions = await AdCopy.find({ _id: { $in: finalSelectedDescriptions }, adsetId, type: 'description' });
+    const ctas = await AdCopy.find({ _id: { $in: finalSelectedCTAs }, adsetId, type: 'cta' });
     
     // Hooks are optional, so only fetch if selected
-    const hooks = selectedHooks.length > 0
-      ? await AdCopy.find({ _id: { $in: selectedHooks }, adsetId, type: 'hook' })
+    const hooks = finalSelectedHooks.length > 0
+      ? await AdCopy.find({ _id: { $in: finalSelectedHooks }, adsetId, type: 'hook' })
       : [];
 
     // Validate that fetched components match selected IDs (in case some IDs are invalid)
-    if (assets.length !== selectedAssets.length) {
+    if (assets.length !== finalSelectedAssets.length) {
       res.status(400).json({ error: 'Some selected assets were not found.' });
       return;
     }
-    if (headlines.length !== selectedHeadlines.length) {
+    if (headlines.length !== finalSelectedHeadlines.length) {
       res.status(400).json({ error: 'Some selected headlines were not found.' });
       return;
     }
-    if (bodies.length !== selectedBodies.length) {
+    if (bodies.length !== finalSelectedBodies.length) {
       res.status(400).json({ error: 'Some selected bodies were not found.' });
       return;
     }
-    if (descriptions.length !== selectedDescriptions.length) {
+    if (descriptions.length !== finalSelectedDescriptions.length) {
       res.status(400).json({ error: 'Some selected descriptions were not found.' });
       return;
     }
-    if (ctas.length !== selectedCTAs.length) {
+    if (ctas.length !== finalSelectedCTAs.length) {
       res.status(400).json({ error: 'Some selected CTAs were not found.' });
       return;
     }
 
     // Get selected CTA types or use default
-    const ctaTypes = selectedCTATypes.length > 0 
-      ? selectedCTATypes 
+    const ctaTypes = finalSelectedCTATypes.length > 0 
+      ? finalSelectedCTATypes 
       : ['LEARN_MORE']; // Default to LEARN_MORE if none selected
 
     // Get landing page URL from adset
