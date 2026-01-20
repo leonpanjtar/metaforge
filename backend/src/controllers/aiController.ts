@@ -427,7 +427,7 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
       analysis: result.analysis,
       prompts: result.prompts,
       provider: 'openai',
-      model: 'gpt-image-1',
+      model: 'gpt-image-1.5',
     });
   } catch (error: any) {
     console.error('Generate image variations with OpenAI error:', error);
