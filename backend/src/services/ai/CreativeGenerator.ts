@@ -171,7 +171,11 @@ Return your analysis as JSON with these fields.`;
     style: string;
     mainSubject: string;
     colors: string[];
-    textElements: string[];
+    textElements: any[];
+    composition?: string;
+    background?: string;
+    preserveElements?: any[];
+    changeableElements?: any[];
   }> {
     try {
       const base64Image = imageBuffer.toString('base64');
@@ -419,11 +423,32 @@ Return your analysis as JSON with these fields:
           let useDalle3Fallback = false;
           
           try {
-            // Try using responses API (for gpt-image-1)
+            // Try using responses API (for gpt-image-1) with image input
             if ((this.getClient() as any).responses?.create) {
+              // Convert image buffer to base64 data URL for the API
+              const imageBase64 = imageBuffer.toString('base64');
+              const imageDataUrl = `data:image/png;base64,${imageBase64}`;
+              
+              // Create messages array with both image and text
+              const messages = [
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'image_url',
+                      image_url: { url: imageDataUrl },
+                    },
+                    {
+                      type: 'text',
+                      text: variationPrompts[i],
+                    },
+                  ],
+                },
+              ];
+              
               const response = await (this.getClient() as any).responses.create({
                 model: 'gpt-image-1',
-                input: variationPrompts[i],
+                messages: messages,
                 tools: [{ 
                   type: 'image_generation',
                 }],
@@ -448,11 +473,33 @@ Return your analysis as JSON with these fields:
             try {
               const axios = require('axios');
               const apiKey = process.env.OPENAI_API_KEY;
+              
+              // Convert image buffer to base64 data URL
+              const imageBase64 = imageBuffer.toString('base64');
+              const imageDataUrl = `data:image/png;base64,${imageBase64}`;
+              
+              // Create messages array with both image and text
+              const messages = [
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'image_url',
+                      image_url: { url: imageDataUrl },
+                    },
+                    {
+                      type: 'text',
+                      text: variationPrompts[i],
+                    },
+                  ],
+                },
+              ];
+              
               const apiResponse = await axios.post(
                 'https://api.openai.com/v1/responses',
                 {
                   model: 'gpt-image-1',
-                  input: variationPrompts[i],
+                  messages: messages,
                   tools: [{ type: 'image_generation' }],
                   tool_choice: { type: 'image_generation' },
                 },
