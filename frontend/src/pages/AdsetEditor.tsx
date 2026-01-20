@@ -364,8 +364,8 @@ const AdsetEditor = () => {
   // Bulk delete combinations mutation
   const deleteCombinationsBulkMutation = useMutation({
     mutationFn: async (combinationIds: string[]) => {
-      await api.delete(`/combinations/bulk/${adsetId}`, {
-        data: { combinationIds },
+      await api.post(`/combinations/bulk-delete/${adsetId}`, {
+        combinationIds,
       });
     },
     onSuccess: () => {

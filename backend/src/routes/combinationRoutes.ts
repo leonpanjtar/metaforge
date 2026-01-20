@@ -14,7 +14,7 @@ router.post('/generate/:adsetId', authenticate, generateCombinations);
 router.get('/:adsetId', authenticate, getCombinations);
 router.get('/preview/:adsetId/:combinationId', authenticate, previewCombination);
 router.delete('/:adsetId/:combinationId', authenticate, deleteCombination);
-router.delete('/bulk/:adsetId', authenticate, deleteCombinationsBulk);
+router.post('/bulk-delete/:adsetId', authenticate, deleteCombinationsBulk);
 
 export default router;
 
