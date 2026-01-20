@@ -242,10 +242,10 @@ export const previewCombination = async (
       return;
     }
 
-    // Refresh token if needed
-    await TokenRefreshService.checkAndRefreshToken(facebookAccount._id.toString());
+    // Refresh token if needed (pass the account object, not the ID)
+    await TokenRefreshService.checkAndRefreshToken(facebookAccount);
 
-    // Get updated account
+    // Get updated account (refresh in case it was updated)
     const updatedAccount = await FacebookAccount.findById(facebookAccount._id);
     if (!updatedAccount) {
       res.status(404).json({ error: 'Facebook account not found' });
