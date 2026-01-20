@@ -35,50 +35,60 @@ export const generateCombinations = async (
       return;
     }
 
-    // Fetch selected components (or all if none selected)
-    const assets = selectedAssets.length > 0
-      ? await Asset.find({ _id: { $in: selectedAssets }, adsetId })
-      : await Asset.find({ adsetId });
+    // Fetch ONLY selected components (no fallback to all)
+    // Validate that components are selected before fetching
+    if (selectedAssets.length === 0) {
+      res.status(400).json({ error: 'Please select at least one asset.' });
+      return;
+    }
+    if (selectedHeadlines.length === 0) {
+      res.status(400).json({ error: 'Please select at least one headline.' });
+      return;
+    }
+    if (selectedBodies.length === 0) {
+      res.status(400).json({ error: 'Please select at least one body.' });
+      return;
+    }
+    if (selectedDescriptions.length === 0) {
+      res.status(400).json({ error: 'Please select at least one description.' });
+      return;
+    }
+    if (selectedCTAs.length === 0) {
+      res.status(400).json({ error: 'Please select at least one CTA.' });
+      return;
+    }
+
+    // Fetch only the selected components
+    const assets = await Asset.find({ _id: { $in: selectedAssets }, adsetId });
+    const headlines = await AdCopy.find({ _id: { $in: selectedHeadlines }, adsetId, type: 'headline' });
+    const bodies = await AdCopy.find({ _id: { $in: selectedBodies }, adsetId, type: 'body' });
+    const descriptions = await AdCopy.find({ _id: { $in: selectedDescriptions }, adsetId, type: 'description' });
+    const ctas = await AdCopy.find({ _id: { $in: selectedCTAs }, adsetId, type: 'cta' });
     
+    // Hooks are optional, so only fetch if selected
     const hooks = selectedHooks.length > 0
       ? await AdCopy.find({ _id: { $in: selectedHooks }, adsetId, type: 'hook' })
-      : await AdCopy.find({ adsetId, type: 'hook' });
-    
-    const headlines = selectedHeadlines.length > 0
-      ? await AdCopy.find({ _id: { $in: selectedHeadlines }, adsetId, type: 'headline' })
-      : await AdCopy.find({ adsetId, type: 'headline' });
-    
-    const bodies = selectedBodies.length > 0
-      ? await AdCopy.find({ _id: { $in: selectedBodies }, adsetId, type: 'body' })
-      : await AdCopy.find({ adsetId, type: 'body' });
-    
-    const descriptions = selectedDescriptions.length > 0
-      ? await AdCopy.find({ _id: { $in: selectedDescriptions }, adsetId, type: 'description' })
-      : await AdCopy.find({ adsetId, type: 'description' });
-    
-    const ctas = selectedCTAs.length > 0
-      ? await AdCopy.find({ _id: { $in: selectedCTAs }, adsetId, type: 'cta' })
-      : await AdCopy.find({ adsetId, type: 'cta' });
+      : [];
 
-    // Validate required components
-    if (assets.length === 0) {
-      res.status(400).json({ error: 'At least one asset is required.' });
+    // Validate that fetched components match selected IDs (in case some IDs are invalid)
+    if (assets.length !== selectedAssets.length) {
+      res.status(400).json({ error: 'Some selected assets were not found.' });
       return;
     }
-    if (headlines.length === 0) {
-      res.status(400).json({ error: 'At least one headline is required.' });
+    if (headlines.length !== selectedHeadlines.length) {
+      res.status(400).json({ error: 'Some selected headlines were not found.' });
       return;
     }
-    if (bodies.length === 0) {
-      res.status(400).json({ error: 'At least one body is required.' });
+    if (bodies.length !== selectedBodies.length) {
+      res.status(400).json({ error: 'Some selected bodies were not found.' });
       return;
     }
-    if (descriptions.length === 0) {
-      res.status(400).json({ error: 'At least one description is required.' });
+    if (descriptions.length !== selectedDescriptions.length) {
+      res.status(400).json({ error: 'Some selected descriptions were not found.' });
       return;
     }
-    if (ctas.length === 0) {
-      res.status(400).json({ error: 'At least one CTA is required.' });
+    if (ctas.length !== selectedCTAs.length) {
+      res.status(400).json({ error: 'Some selected CTAs were not found.' });
       return;
     }
 
