@@ -8,6 +8,7 @@ import { FacebookApiService } from '../services/facebook/FacebookApiService';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { Campaign } from '../models/Campaign';
 import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
+import { ScoringService } from '../services/ai/ScoringService';
 
 export const generateCombinations = async (
   req: AuthRequest,
@@ -184,6 +185,117 @@ export const generateCombinations = async (
   } catch (error: any) {
     console.error('Generate combinations error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate combinations' });
+  }
+};
+
+export const scoreCombinations = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const { adsetId } = req.params;
+    const { minScore = 70 } = req.body; // Default minimum score is 70
+
+    // Verify adset ownership
+    const adset = await Adset.findOne({
+      _id: adsetId,
+      userId: req.userId,
+    }).populate('contentData');
+
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    // Fetch all combinations for this adset with populated fields
+    const combinations = await AdCombination.find({ adsetId })
+      .populate('assetIds')
+      .populate('headlineId')
+      .populate('hookId')
+      .populate('bodyId')
+      .populate('descriptionId')
+      .populate('ctaId');
+
+    if (combinations.length === 0) {
+      res.json({
+        success: true,
+        message: 'No combinations found to score',
+        totalCombinations: 0,
+        scored: 0,
+        deleted: 0,
+        kept: 0,
+      });
+      return;
+    }
+
+    const scoringService = new ScoringService();
+    let scoredCount = 0;
+    let deletedCount = 0;
+    let keptCount = 0;
+    const deletedIds: string[] = [];
+
+    // Score each combination
+    for (const combination of combinations) {
+      try {
+        // Get required components
+        const asset = Array.isArray(combination.assetIds) && combination.assetIds.length > 0
+          ? combination.assetIds[0] as any
+          : null;
+        const headline = combination.headlineId as any;
+        const body = combination.bodyId as any;
+        const description = combination.descriptionId as any;
+        const cta = combination.ctaId as any;
+
+        if (!asset || !headline || !body || !description || !cta) {
+          console.error(`Combination ${combination._id} is missing required components`);
+          continue;
+        }
+
+        // Score the combination
+        const scoring = await scoringService.scoreCombination(
+          asset,
+          headline,
+          body,
+          description,
+          cta,
+          adset as any
+        );
+
+        // Update combination with scores
+        combination.scores = scoring.scores;
+        combination.overallScore = scoring.overallScore;
+        combination.predictedCTR = scoring.predictedCTR;
+        await combination.save();
+
+        scoredCount++;
+
+        // Delete if score is below minimum
+        if (scoring.overallScore < minScore) {
+          await AdCombination.findByIdAndDelete(combination._id);
+          deletedCount++;
+          deletedIds.push(combination._id.toString());
+        } else {
+          keptCount++;
+        }
+      } catch (error: any) {
+        console.error(`Error scoring combination ${combination._id}:`, error);
+        // Continue with next combination
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Scored ${scoredCount} combinations. Deleted ${deletedCount} below score ${minScore}.`,
+      totalCombinations: combinations.length,
+      scored: scoredCount,
+      deleted: deletedCount,
+      kept: keptCount,
+      deletedIds: deletedIds,
+      minScore: minScore,
+    });
+  } catch (error: any) {
+    console.error('Score combinations error:', error);
+    res.status(500).json({ error: error.message || 'Failed to score combinations' });
   }
 };
 

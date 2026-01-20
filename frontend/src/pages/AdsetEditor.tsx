@@ -491,6 +491,21 @@ const AdsetEditor = () => {
     },
   });
 
+  // Score combinations mutation
+  const scoreCombinationsMutation = useMutation({
+    mutationFn: async (minScore?: number) => {
+      const response = await api.post(`/combinations/score/${adsetId}`, { minScore: minScore || 70 });
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['combinations', adsetId] });
+      alert(`Scored ${data.scored} combinations. Deleted ${data.deleted} below score ${data.minScore}.`);
+    },
+    onError: (error: any) => {
+      alert(`Failed to score combinations: ${error.response?.data?.error || error.message}`);
+    },
+  });
+
   // Delete asset mutation
   const deleteAssetMutation = useMutation({
     mutationFn: async (assetId: string) => {
@@ -1980,6 +1995,17 @@ const AdsetEditor = () => {
                   <div className="flex justify-between items-center">
                     <h2 className="text-xl font-semibold">Ad Combinations ({combinations.length})</h2>
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (confirm('This will score all combinations and delete those below 70. Continue?')) {
+                            scoreCombinationsMutation.mutate(70);
+                          }
+                        }}
+                        disabled={scoreCombinationsMutation.isPending}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 text-sm"
+                      >
+                        {scoreCombinationsMutation.isPending ? 'Scoring...' : 'Score & Filter (≥70)'}
+                      </button>
                       <button
                         onClick={() => {
                           // Select all
