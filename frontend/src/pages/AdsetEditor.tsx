@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
@@ -198,6 +198,73 @@ const AdsetEditor = () => {
       queryClient.invalidateQueries({ queryKey: ['ad-copies', adsetId] });
     },
   });
+
+  // Track edited copy content
+  const [editedCopyContent, setEditedCopyContent] = useState<Record<string, string>>({});
+  const [savingCopyIds, setSavingCopyIds] = useState<Set<string>>(new Set());
+  const [savedCopyIds, setSavedCopyIds] = useState<Set<string>>(new Set());
+  const saveTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // Update copy mutation
+  const updateCopyMutation = useMutation({
+    mutationFn: async ({ copyId, content }: { copyId: string; content: string }) => {
+      await api.put(`/ad-copies/${copyId}`, { content });
+    },
+    onSuccess: (_data, variables) => {
+      // Update local state
+      setEditedCopyContent(prev => {
+        const next = { ...prev };
+        delete next[variables.copyId];
+        return next;
+      });
+      setSavingCopyIds(prev => {
+        const next = new Set(prev);
+        next.delete(variables.copyId);
+        return next;
+      });
+      setSavedCopyIds(prev => new Set(prev).add(variables.copyId));
+      // Clear saved indicator after 2 seconds
+      setTimeout(() => {
+        setSavedCopyIds(prev => {
+          const next = new Set(prev);
+          next.delete(variables.copyId);
+          return next;
+        });
+      }, 2000);
+      // Invalidate to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['ad-copies', adsetId] });
+    },
+    onError: (_error: any, variables) => {
+      setSavingCopyIds(prev => {
+        const next = new Set(prev);
+        next.delete(variables.copyId);
+        return next;
+      });
+    },
+  });
+
+  // Handle copy content change with debounced autosave
+  const handleCopyContentChange = (copyId: string, newContent: string) => {
+    // Update local state immediately for responsive UI
+    setEditedCopyContent(prev => ({ ...prev, [copyId]: newContent }));
+    setSavedCopyIds(prev => {
+      const next = new Set(prev);
+      next.delete(copyId);
+      return next;
+    });
+
+    // Clear existing timeout for this copy
+    if (saveTimeoutsRef.current[copyId]) {
+      clearTimeout(saveTimeoutsRef.current[copyId]);
+    }
+
+    // Set new timeout for autosave (1 second after user stops typing)
+    saveTimeoutsRef.current[copyId] = setTimeout(() => {
+      setSavingCopyIds(prev => new Set(prev).add(copyId));
+      updateCopyMutation.mutate({ copyId, content: newContent });
+      delete saveTimeoutsRef.current[copyId];
+    }, 1000);
+  };
 
   // Delete all generated copy mutation
   const deleteAllGeneratedCopyMutation = useMutation({
@@ -1022,29 +1089,71 @@ const AdsetEditor = () => {
                           {type}s ({typeCopies.length})
                         </h3>
                         <div className="space-y-2">
-                          {typeCopies.map((copy) => (
-                            <div
-                              key={copy._id}
-                              className="p-3 bg-gray-50 rounded border border-gray-200 flex justify-between items-start group"
-                            >
-                              <p className="text-sm text-gray-700 flex-1">{copy.content}</p>
-                              <div className="flex items-center gap-2 ml-4">
-                                {copy.generatedByAI && (
-                                  <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
-                                    AI
-                                  </span>
-                                )}
-                                <button
-                                  onClick={() => handleDeleteCopy(copy._id)}
-                                  disabled={deleteCopyMutation.isPending}
-                                  className="opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-800 text-sm px-2 py-1 rounded transition-opacity"
-                                  title="Delete"
-                                >
-                                  ×
-                                </button>
+                          {typeCopies.map((copy) => {
+                            const displayContent = editedCopyContent[copy._id] !== undefined 
+                              ? editedCopyContent[copy._id] 
+                              : copy.content;
+                            const isSaving = savingCopyIds.has(copy._id);
+                            const isSaved = savedCopyIds.has(copy._id);
+                            
+                            return (
+                              <div
+                                key={copy._id}
+                                className="p-3 bg-gray-50 rounded border border-gray-200 group"
+                              >
+                                <div className="flex items-start gap-2">
+                                  <textarea
+                                    value={displayContent}
+                                    onChange={(e) => {
+                                      e.target.style.height = 'auto';
+                                      e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                                      handleCopyContentChange(copy._id, e.target.value);
+                                    }}
+                                    onInput={(e) => {
+                                      const target = e.target as HTMLTextAreaElement;
+                                      target.style.height = 'auto';
+                                      target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                                    }}
+                                    className="flex-1 text-sm text-gray-700 bg-white border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                    style={{ minHeight: '40px', maxHeight: '200px' }}
+                                    rows={1}
+                                  />
+                                  <div className="flex items-start gap-2 flex-shrink-0">
+                                    {isSaving && (
+                                      <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded flex items-center gap-1">
+                                        <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Saving...
+                                      </span>
+                                    )}
+                                    {isSaved && !isSaving && (
+                                      <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded flex items-center gap-1">
+                                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Saved
+                                      </span>
+                                    )}
+                                    {copy.generatedByAI && !isSaving && !isSaved && (
+                                      <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                                        AI
+                                      </span>
+                                    )}
+                                    <button
+                                      onClick={() => handleDeleteCopy(copy._id)}
+                                      disabled={deleteCopyMutation.isPending}
+                                      className="opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-800 text-sm px-2 py-1 rounded transition-opacity"
+                                      title="Delete"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
