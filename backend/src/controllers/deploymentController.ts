@@ -28,26 +28,27 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     const apiService = new FacebookApiService(facebookAccount.accessToken);
-    const deployedAds = [];
-    const errors = [];
+    
+    // Get Facebook Page ID (required for ad creation)
+    let pageId: string | null = null;
+    try {
+      const pages = await apiService.getPages();
+      if (pages && pages.length > 0) {
+        pageId = pages[0].id;
+      } else {
+        throw new Error('No Facebook pages found. Please connect a Facebook page to your account.');
+      }
+    } catch (error: any) {
+      res.status(400).json({ 
+        error: 'Failed to get Facebook page',
+        details: error.message || 'Please ensure you have a connected Facebook page'
+      });
+      return;
+    }
 
-    for (const combinationId of combinationIds) {
-      try {
-        const combination = await AdCombination.findById(combinationId)
-          .populate('assetIds')
-          .populate('headlineId')
-          .populate('bodyId')
-          .populate('descriptionId')
-          .populate('ctaId');
-
-        if (!combination) {
-          errors.push({ combinationId, error: 'Combination not found' });
-          continue;
-        }
-
-        // Create adset if not exists on Facebook
-        let facebookAdsetId = adset.facebookAdsetId;
-        if (!facebookAdsetId) {
+    // Create adset if not exists on Facebook (do this ONCE before the loop)
+    let facebookAdsetId = adset.facebookAdsetId;
+    if (!facebookAdsetId) {
           // Build comprehensive adset data with all settings
           const adsetData: any = {
             name: adset.name,
@@ -100,62 +101,164 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
             adsetData.lifetime_budget = adset.lifetimeBudget * 100; // Convert to cents
           }
 
-          facebookAdsetId = await apiService.createAdset(
-            `act_${facebookAccount.accountId}`,
-            adsetData
-          );
-          adset.facebookAdsetId = facebookAdsetId;
-          await adset.save();
+      try {
+        facebookAdsetId = await apiService.createAdset(
+          `act_${facebookAccount.accountId}`,
+          adsetData
+        );
+        adset.facebookAdsetId = facebookAdsetId;
+        await adset.save();
+      } catch (error: any) {
+        console.error('Failed to create adset:', error);
+        res.status(400).json({
+          error: 'Failed to create adset',
+          details: error.message || 'Invalid adset parameters',
+          adsetData: adsetData,
+        });
+        return;
+      }
+    }
+
+    const deployedAds = [];
+    const errors = [];
+
+    // Now create ads for each combination
+    for (const combinationId of combinationIds) {
+      try {
+        const combination = await AdCombination.findById(combinationId)
+          .populate('assetIds')
+          .populate('headlineId')
+          .populate('hookId')
+          .populate('bodyId')
+          .populate('descriptionId')
+          .populate('ctaId');
+
+        if (!combination) {
+          errors.push({ combinationId, error: 'Combination not found' });
+          continue;
         }
 
-        // Upload assets
-        const asset = combination.assetIds[0];
-        let creativeSpec: any = {};
+        // Get landing page URL from combination or adset
+        const landingPageUrl = combination.url || (adset as any).contentData?.landingPageUrl || '';
+        if (!landingPageUrl) {
+          errors.push({ 
+            combinationId, 
+            error: 'Landing page URL is required. Please set it in Content Data or combination.' 
+          });
+          continue;
+        }
 
-        if (asset.type === 'image') {
-          const imageHash = await apiService.uploadAdImage(
-            `act_${facebookAccount.accountId}`,
-            `${process.env.API_URL || 'http://localhost:3001'}${asset.url}`
-          );
-          creativeSpec = {
-            object_story_spec: {
-              page_id: facebookAccount.accountId, // You'd need to store page ID
-              link_data: {
-                image_hash: imageHash,
-                link: 'https://example.com', // Landing page URL
-                message: combination.bodyId.content,
-                name: combination.headlineId.content,
-                description: combination.descriptionId.content,
-                call_to_action: {
-                  type: 'LEARN_MORE',
-                  value: {
-                    link: 'https://example.com',
-                  },
-                },
+        // Get asset
+        const asset = Array.isArray(combination.assetIds) && combination.assetIds.length > 0
+          ? combination.assetIds[0] as any
+          : null;
+
+        if (!asset || asset.type !== 'image') {
+          errors.push({ combinationId, error: 'Combination must have at least one image asset' });
+          continue;
+        }
+
+        // Upload image to get hash
+        const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.API_URL || 'http://localhost:3001';
+        let imageHash = asset.metadata?.facebookImageHash;
+        
+        if (!imageHash) {
+          try {
+            const imageUrl = asset.url.startsWith('http') 
+              ? asset.url 
+              : `${PUBLIC_BASE_URL}${asset.url}`;
+            imageHash = await apiService.uploadAdImage(
+              `act_${facebookAccount.accountId}`,
+              imageUrl
+            );
+            // Save hash to asset metadata for future use
+            asset.metadata = asset.metadata || {};
+            asset.metadata.facebookImageHash = imageHash;
+            await asset.save();
+          } catch (error: any) {
+            console.error(`Failed to upload image for combination ${combinationId}:`, error);
+            errors.push({ 
+              combinationId, 
+              error: `Failed to upload image: ${error.message || 'Unknown error'}` 
+            });
+            continue;
+          }
+        }
+
+        // Build ad body: hook + body + CTA (with empty lines)
+        let adBody = '';
+        const hook = combination.hookId as any;
+        const body = combination.bodyId as any;
+        const cta = combination.ctaId as any;
+        
+        if (hook?.content) {
+          adBody += hook.content + '\n\n';
+        }
+        if (body?.content) {
+          adBody += body.content;
+        }
+        if (cta?.content) {
+          adBody += '\n\n' + cta.content;
+        }
+
+        // Get CTA type from combination
+        const ctaType = combination.ctaType || 'LEARN_MORE';
+
+        // Build creative spec
+        const creativeSpec = {
+          object_story_spec: {
+            page_id: pageId,
+            link_data: {
+              image_hash: imageHash,
+              link: landingPageUrl,
+              message: adBody,
+              name: (combination.headlineId as any)?.content || '',
+              description: (combination.descriptionId as any)?.content || '',
+              call_to_action: {
+                type: ctaType,
               },
             },
-          };
+          },
+        };
+
+        // Create ad
+        try {
+          const facebookAdId = await apiService.createAd(facebookAdsetId, {
+            ...creativeSpec,
+            status,
+          });
+
+          combination.deployedToFacebook = true;
+          combination.facebookAdId = facebookAdId;
+          await combination.save();
+
+          deployedAds.push({
+            combinationId: combination._id,
+            facebookAdId,
+          });
+        } catch (adError: any) {
+          console.error(`Failed to create ad for combination ${combinationId}:`, {
+            error: adError.message,
+            response: adError.response?.data,
+            creativeSpec: creativeSpec,
+          });
+          
+          // Extract detailed error information
+          const fbError = adError.response?.data?.error;
+          const errorMessage = fbError?.message || adError.message || 'Failed to create ad';
+          const errorCode = fbError?.code;
+          const errorType = fbError?.type;
+          
+          errors.push({
+            combinationId,
+            error: errorMessage,
+            code: errorCode,
+            type: errorType,
+            details: fbError || undefined,
+          });
         }
-
-        // Create ad with optional Meta AI features
-        // Meta AI features (text generation, image expansion) are enabled via degrees_of_freedom_spec
-        // when creating the creative. For now, we create the ad normally.
-        // To enable Meta AI, you would need to create the creative first with AI features,
-        // then use that creative when creating the ad.
-        const facebookAdId = await apiService.createAd(facebookAdsetId, {
-          ...creativeSpec,
-          status,
-        });
-
-        combination.deployedToFacebook = true;
-        combination.facebookAdId = facebookAdId;
-        await combination.save();
-
-        deployedAds.push({
-          combinationId: combination._id,
-          facebookAdId,
-        });
       } catch (error: any) {
+        console.error(`Failed to process combination ${combinationId}:`, error);
         errors.push({
           combinationId,
           error: error.message || 'Failed to deploy',
