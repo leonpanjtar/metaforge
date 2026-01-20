@@ -25,7 +25,8 @@ export const generateCombinations = async (
       selectedBodies = [],
       selectedCTAs = [],
       selectedHeadlines = [],
-      selectedDescriptions = []
+      selectedDescriptions = [],
+      selectedCTATypes = []
     } = req.body;
 
     const adset = await Adset.findOne({
@@ -85,6 +86,11 @@ export const generateCombinations = async (
       return;
     }
 
+    // Get selected CTA types or use default
+    const ctaTypes = selectedCTATypes.length > 0 
+      ? selectedCTATypes 
+      : ['LEARN_MORE']; // Default to LEARN_MORE if none selected
+
     // Get landing page URL from adset
     const landingPageUrl = (adset as any).contentData?.landingPageUrl || '';
 
@@ -105,38 +111,41 @@ export const generateCombinations = async (
               const hookList = hooks.length > 0 ? hooks : [null];
               
               for (const hook of hookList) {
-                try {
-                  // Score the combination
-                  const scoring = await scoringService.scoreCombination(
-                    asset,
-                    headline,
-                    body,
-                    description,
-                    cta,
-                    adset
-                  );
+                // For each CTA button type, create a combination
+                for (const ctaType of ctaTypes) {
+                  try {
+                    // Score the combination
+                    const scoring = await scoringService.scoreCombination(
+                      asset,
+                      headline,
+                      body,
+                      description,
+                      cta,
+                      adset
+                    );
 
-                  const combination = new AdCombination({
-                    adsetId,
-                    assetIds: [asset._id],
-                    headlineId: headline._id,
-                    hookId: hook?._id,
-                    bodyId: body._id,
-                    descriptionId: description._id,
-                    ctaId: cta._id,
-                    ctaType: 'LEARN_MORE', // Default CTA type, can be changed later
-                    url: landingPageUrl,
-                    scores: scoring.scores,
-                    overallScore: scoring.overallScore,
-                    predictedCTR: scoring.predictedCTR,
-                    deployedToFacebook: false,
-                  });
+                    const combination = new AdCombination({
+                      adsetId,
+                      assetIds: [asset._id],
+                      headlineId: headline._id,
+                      hookId: hook?._id,
+                      bodyId: body._id,
+                      descriptionId: description._id,
+                      ctaId: cta._id,
+                      ctaType: ctaType, // Use selected CTA button type
+                      url: landingPageUrl,
+                      scores: scoring.scores,
+                      overallScore: scoring.overallScore,
+                      predictedCTR: scoring.predictedCTR,
+                      deployedToFacebook: false,
+                    });
 
-                  await combination.save();
-                  combinations.push(combination);
-                } catch (error: any) {
-                  console.error(`Error creating combination:`, error);
-                  // Continue with next combination
+                    await combination.save();
+                    combinations.push(combination);
+                  } catch (error: any) {
+                    console.error(`Error creating combination:`, error);
+                    // Continue with next combination
+                  }
                 }
               }
             }

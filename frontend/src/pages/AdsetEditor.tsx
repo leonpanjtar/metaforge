@@ -412,6 +412,7 @@ const AdsetEditor = () => {
     ctas: string[];
     headlines: string[];
     descriptions: string[];
+    ctaTypes: string[]; // Facebook CTA button types
   }>({
     assets: [],
     hooks: [],
@@ -419,6 +420,7 @@ const AdsetEditor = () => {
     ctas: [],
     headlines: [],
     descriptions: [],
+    ctaTypes: [],
   });
 
   // Selected combinations state (all selected by default when generated)
@@ -1894,6 +1896,69 @@ const AdsetEditor = () => {
                           <p className="text-xs text-gray-500">No descriptions available</p>
                         )}
                       </div>
+                    </div>
+
+                    {/* CTA Button Types */}
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-gray-700">
+                          CTA Button Types ({FACEBOOK_CTA_TYPES.length} available)
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedComponents(prev => ({
+                                ...prev,
+                                ctaTypes: FACEBOOK_CTA_TYPES
+                              }));
+                            }}
+                            className="text-xs px-2 py-1 text-blue-600 hover:text-blue-800"
+                          >
+                            Select All
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedComponents(prev => ({
+                                ...prev,
+                                ctaTypes: []
+                              }));
+                            }}
+                            className="text-xs px-2 py-1 text-gray-600 hover:text-gray-800"
+                          >
+                            Deselect All
+                          </button>
+                        </div>
+                      </div>
+                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {FACEBOOK_CTA_TYPES.map((ctaType) => (
+                          <label key={ctaType} className="flex items-center gap-2 py-1 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={selectedComponents.ctaTypes.includes(ctaType)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedComponents(prev => ({
+                                    ...prev,
+                                    ctaTypes: [...prev.ctaTypes, ctaType]
+                                  }));
+                                } else {
+                                  setSelectedComponents(prev => ({
+                                    ...prev,
+                                    ctaTypes: prev.ctaTypes.filter(type => type !== ctaType)
+                                  }));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="truncate text-xs">{formatCTAType(ctaType)}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Select which Facebook CTA button types to use. Leave empty to use default (Learn More).
+                      </p>
                     </div>
                   </div>
 
