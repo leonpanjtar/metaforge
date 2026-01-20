@@ -28,6 +28,7 @@ To use Facebook OAuth with localhost, you need to configure your Facebook App se
 - Make sure your app is in **Development Mode** (not Live)
 - The redirect URI in your `.env` must exactly match what you configure in Facebook
 - App Domains field is only required for production domains (like `example.com`)
+- Go to FB Business settings -> Apps and add Ad Accounts to App assets
 
 ## Installation
 

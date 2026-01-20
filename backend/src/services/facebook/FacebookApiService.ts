@@ -34,6 +34,49 @@ export class FacebookApiService {
     });
   }
 
+  /**
+   * Debug helper: log token scopes & permissions (dev only)
+   */
+  private async logTokenScopesIfDev() {
+    if (process.env.NODE_ENV !== 'development') return;
+
+    try {
+      const appId = process.env.FACEBOOK_APP_ID;
+      const appSecret = process.env.FACEBOOK_APP_SECRET;
+      if (!appId || !appSecret) {
+        console.warn(
+          '[FacebookApiService.debugToken] FACEBOOK_APP_ID or FACEBOOK_APP_SECRET not set; cannot debug token scopes.'
+        );
+        return;
+      }
+
+      const debugResponse = await axios.get(
+        `https://graph.facebook.com/${this.apiVersion}/debug_token`,
+        {
+          params: {
+            input_token: this.accessToken,
+            access_token: `${appId}|${appSecret}`,
+          },
+        }
+      );
+
+      const data = debugResponse.data?.data;
+      console.log('[FacebookApiService.debugToken] Token info:', {
+        app_id: data?.app_id,
+        type: data?.type,
+        is_valid: data?.is_valid,
+        scopes: data?.scopes,
+        expires_at: data?.expires_at,
+        user_id: data?.user_id,
+      });
+    } catch (err: any) {
+      console.warn(
+        '[FacebookApiService.debugToken] Failed to debug token:',
+        err.response?.data || err.message
+      );
+    }
+  }
+
   async getAdAccounts(): Promise<FacebookAdAccount[]> {
     try {
       const response = await this.api.get('/me/adaccounts', {
@@ -139,6 +182,7 @@ export class FacebookApiService {
 
   async uploadAdImage(accountId: string, imageUrl: string): Promise<string> {
     try {
+      await this.logTokenScopesIfDev();
       console.log('[FacebookApiService.uploadAdImage] Request', {
         accountId,
         imageUrl,
