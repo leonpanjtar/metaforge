@@ -688,7 +688,16 @@ const AssetManager = () => {
                           setVariantResults(result);
                           alert(`Successfully generated ${result.count} variation(s)!`);
                         } catch (error: any) {
-                          alert(error.response?.data?.error || 'Failed to generate variants');
+                          const errorMessage = error.response?.data?.error || 'Failed to generate variants';
+                          const errorDetails = error.response?.data?.details || '';
+                          const errorHint = error.response?.data?.hint || '';
+                          
+                          const fullMessage = errorDetails 
+                            ? `${errorMessage}\n\nDetails: ${errorDetails}${errorHint ? `\n\nHint: ${errorHint}` : ''}`
+                            : errorMessage;
+                          
+                          alert(fullMessage);
+                          console.error('Generate variants error:', error.response?.data || error);
                         } finally {
                           setGeneratingVariants(false);
                         }
@@ -708,7 +717,16 @@ const AssetManager = () => {
                           });
                           setVariantResults(result);
                         } catch (error: any) {
-                          alert(error.response?.data?.error || 'Failed to generate variants');
+                          const errorMessage = error.response?.data?.error || 'Failed to generate variants';
+                          const errorDetails = error.response?.data?.details || '';
+                          const errorHint = error.response?.data?.hint || '';
+                          
+                          const fullMessage = errorDetails 
+                            ? `${errorMessage}\n\nDetails: ${errorDetails}${errorHint ? `\n\nHint: ${errorHint}` : ''}`
+                            : errorMessage;
+                          
+                          alert(fullMessage);
+                          console.error('Generate variants error:', error.response?.data || error);
                         } finally {
                           setGeneratingVariants(false);
                         }

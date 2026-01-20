@@ -256,7 +256,19 @@ Return your analysis as JSON with these fields:
   }> {
     try {
       // Step 1: Analyze the image
-      const analysis = await this.analyzeImageForVariations(imageBuffer, userInstructions);
+      console.log('[CreativeGenerator] Starting image analysis...');
+      let analysis;
+      try {
+        analysis = await this.analyzeImageForVariations(imageBuffer, userInstructions);
+        console.log('[CreativeGenerator] Image analysis completed:', {
+          description: analysis.description?.substring(0, 100),
+          style: analysis.style,
+          aspectRatio: analysis.aspectRatio
+        });
+      } catch (error: any) {
+        console.error('[CreativeGenerator] Image analysis failed:', error);
+        throw new Error(`Image analysis failed: ${error.message || 'Unknown error'}`);
+      }
 
       // Step 2: Determine size based on aspect ratio
       const { width, height } = analysis.dimensions;
@@ -331,12 +343,16 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
 
       // Step 4: Generate all variations
       const imageUrls: string[] = [];
+      const errors: string[] = [];
       
-      for (const prompt of variationPrompts) {
+      console.log(`[CreativeGenerator] Generating ${variationPrompts.length} variations with DALL-E 3...`);
+      
+      for (let i = 0; i < variationPrompts.length; i++) {
         try {
+          console.log(`[CreativeGenerator] Generating variation ${i + 1}/${variationPrompts.length}...`);
           const response = await this.getClient().images.generate({
             model: 'dall-e-3',
-            prompt: prompt,
+            prompt: variationPrompts[i],
             n: 1,
             size: size,
             quality: 'hd', // High quality
@@ -345,12 +361,36 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
 
           if (response.data?.[0]?.url) {
             imageUrls.push(response.data[0].url);
+            console.log(`[CreativeGenerator] Variation ${i + 1} generated successfully`);
+          } else {
+            const errorMsg = `Variation ${i + 1}: No URL in response`;
+            console.error(`[CreativeGenerator] ${errorMsg}`);
+            errors.push(errorMsg);
           }
         } catch (error: any) {
-          console.error(`Failed to generate variation ${imageUrls.length + 1}:`, error.message);
+          const errorMsg = `Variation ${i + 1}: ${error.message || 'Unknown error'}`;
+          console.error(`[CreativeGenerator] ${errorMsg}`, error);
+          errors.push(errorMsg);
+          
+          // If it's an API key error, throw immediately
+          if (error.message?.includes('API key') || error.message?.includes('authentication')) {
+            throw new Error(`OpenAI API authentication failed: ${error.message}. Please check your OPENAI_API_KEY environment variable.`);
+          }
+          
+          // If it's a rate limit error, throw immediately
+          if (error.message?.includes('rate limit') || error.status === 429) {
+            throw new Error(`OpenAI rate limit exceeded: ${error.message}. Please try again later.`);
+          }
+          
           // Continue with other variations even if one fails
         }
       }
+      
+      if (imageUrls.length === 0 && errors.length > 0) {
+        throw new Error(`All variations failed to generate. Errors: ${errors.join('; ')}`);
+      }
+      
+      console.log(`[CreativeGenerator] Successfully generated ${imageUrls.length}/${variationPrompts.length} variations`);
 
       return {
         imageUrls,
@@ -358,7 +398,28 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
         analysis,
       };
     } catch (error: any) {
-      throw new Error(`Failed to generate image variations with OpenAI: ${error.message}`);
+      const errorMessage = error.message || 'Unknown error';
+      console.error('[CreativeGenerator] generateImageVariationsWithOpenAI failed:', {
+        message: errorMessage,
+        stack: error.stack,
+        count,
+        hasInstructions: !!userInstructions
+      });
+      
+      // Provide more specific error messages
+      if (errorMessage.includes('OPENAI_API_KEY') || errorMessage.includes('API key')) {
+        throw new Error('OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.');
+      }
+      
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+        throw new Error('OpenAI rate limit exceeded. Please wait a moment and try again.');
+      }
+      
+      if (errorMessage.includes('analysis')) {
+        throw new Error(`Image analysis failed: ${errorMessage}`);
+      }
+      
+      throw new Error(`Failed to generate image variations: ${errorMessage}`);
     }
   }
 }

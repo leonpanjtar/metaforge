@@ -149,7 +149,7 @@ export const generateSingleImageVariation = async (req: AuthRequest, res: Respon
 
 export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { adsetId, count = 3, instructions } = req.body;
+    const { adsetId, count, instructions } = req.body;
     const file = (req as any).file;
 
     if (!adsetId) {
@@ -159,6 +159,13 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
 
     if (!file) {
       res.status(400).json({ error: 'Image file is required' });
+      return;
+    }
+
+    // Parse count (may come as string from FormData)
+    const variantCount = parseInt(String(count || '3'), 10);
+    if (isNaN(variantCount) || variantCount < 1 || variantCount > 10) {
+      res.status(400).json({ error: 'Count must be a number between 1 and 10' });
       return;
     }
 
@@ -182,15 +189,35 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
     }
 
     // Generate variations using OpenAI
-    const creativeGenerator = new CreativeGenerator();
-    const result = await creativeGenerator.generateImageVariationsWithOpenAI(
-      file.buffer,
-      count,
-      instructions
-    );
+    let result;
+    try {
+      const creativeGenerator = new CreativeGenerator();
+      result = await creativeGenerator.generateImageVariationsWithOpenAI(
+        file.buffer,
+        variantCount,
+        instructions
+      );
+    } catch (error: any) {
+      console.error('[generateImageVariationsWithOpenAI] Generation failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to generate image variations',
+        details: error.message || 'Unknown error during image generation',
+        hint: error.message?.includes('OPENAI_API_KEY') 
+          ? 'Please check your OpenAI API key configuration'
+          : error.message?.includes('rate limit')
+          ? 'OpenAI rate limit exceeded. Please try again later.'
+          : 'Check server logs for more details'
+      });
+      return;
+    }
 
-    if (result.imageUrls.length === 0) {
-      res.status(500).json({ error: 'Failed to generate any image variations' });
+    if (!result || result.imageUrls.length === 0) {
+      console.error('[generateImageVariationsWithOpenAI] No images generated:', result);
+      res.status(500).json({ 
+        error: 'Failed to generate any image variations',
+        details: 'OpenAI did not return any generated images',
+        hint: 'This might be due to prompt issues or API rate limits. Try reducing the number of variants or simplifying instructions.'
+      });
       return;
     }
 
