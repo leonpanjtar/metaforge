@@ -104,7 +104,6 @@ const AdsetEditor = () => {
   }>({ type: null, content: '' });
 
   // Asset variant generation state
-  const [assetVariantCounts, setAssetVariantCounts] = useState<Record<string, number>>({});
   const [generatingForAsset, setGeneratingForAsset] = useState<string | null>(null);
   const [showVariantGenerator, setShowVariantGenerator] = useState(false);
   const [selectedAssetForVariants, setSelectedAssetForVariants] = useState<Asset | null>(null);
@@ -374,15 +373,6 @@ const AdsetEditor = () => {
     },
   });
 
-  const handleGenerateVariantsForAsset = async (assetId: string) => {
-    const asset = assets?.find(a => a._id === assetId);
-    if (!asset) return;
-    
-    setSelectedAssetForVariants(asset);
-    setVariantCount(assetVariantCounts[assetId] || 3);
-    setVariantPrompt('');
-    setShowVariantGenerator(true);
-  };
 
   const handleGenerateVariants = async () => {
     if (!selectedAssetForVariants || !adsetId) return;
@@ -465,7 +455,6 @@ const AdsetEditor = () => {
           angle: angle || '',
           keywords: keywords || [],
           importantThings: importantThings || '',
-          baseAssets: assets?.map(a => a._id) || [],
         },
       };
       console.log('Saving content data:', payload);
@@ -615,8 +604,8 @@ const AdsetEditor = () => {
           <nav className="flex -mb-px" aria-label="Tabs">
             {[
               { id: 'content', label: 'Content Data', icon: '📝' },
-              { id: 'generated-content', label: 'Generated Content', icon: '✍️' },
-              { id: 'generated-assets', label: 'Generated Assets', icon: '🖼️' },
+              { id: 'generated-content', label: 'Content', icon: '✍️' },
+              { id: 'generated-assets', label: 'Assets', icon: '🖼️' },
               { id: 'combinations', label: 'Combinations & Deploy', icon: '🚀' },
             ].map((tab) => (
               <button
@@ -755,36 +744,6 @@ const AdsetEditor = () => {
                 <p className="mt-1 text-xs text-gray-500">
                   Key points, features, or messaging to emphasize in ads
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Base Assets
-                </label>
-                <div className="border border-gray-300 rounded-lg p-4">
-                  <FileUpload adsetId={adsetId || ''} onUploadComplete={() => refetchAssets()} />
-                </div>
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {assets?.map((asset) => (
-                    <div key={asset._id} className="relative">
-                      {asset.type === 'image' ? (
-                        <img
-                          src={`${API_URL}${asset.url}`}
-                          alt={asset.filename}
-                          className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
-                        />
-                      ) : (
-                        <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center">
-                          <span className="text-gray-500 text-sm">Video</span>
-                        </div>
-                      )}
-                      <p className="mt-1 text-xs text-gray-600 truncate">{asset.filename}</p>
-                    </div>
-                  ))}
-                </div>
-                {(!assets || assets.length === 0) && (
-                  <p className="text-sm text-gray-500 mt-2">No assets uploaded yet</p>
-                )}
               </div>
 
               <div className="flex justify-end gap-4 pt-4 border-t">
@@ -1109,12 +1068,37 @@ const AdsetEditor = () => {
                     if (type === 'cta') {
                       console.log('CTAs found:', typeCopies.length, typeCopies);
                     }
-                    if (typeCopies.length === 0) return null;
+                    // Always show the section even if empty, so users know CTAs are supported
+                    // But only render if there are copies
+                    if (typeCopies.length === 0) {
+                      // Show empty state for CTAs specifically to make it clear they're supported
+                      if (type === 'cta') {
+                        return (
+                          <div key={type} className="border rounded-lg p-4 bg-green-50 border-green-200">
+                            <h3 className="font-semibold text-green-900 mb-3">CTAs (0)</h3>
+                            <p className="text-sm text-gray-500 italic">No CTAs generated yet. Generate copy with CTAs enabled above.</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }
 
+                    // Map type to display name
+                    const typeDisplayNames: Record<string, string> = {
+                      headline: 'Headlines',
+                      hook: 'Hooks',
+                      body: 'Bodies',
+                      description: 'Descriptions',
+                      cta: 'CTAs',
+                    };
+                    
+                    const isBody = type === 'body';
+                    const isCTA = type === 'cta';
+                    
                     return (
-                      <div key={type} className="border rounded-lg p-4">
-                        <h3 className="font-semibold text-gray-900 mb-3 capitalize">
-                          {type}s ({typeCopies.length})
+                      <div key={type} className={`border rounded-lg p-4 ${isBody ? 'bg-blue-50 border-blue-200' : isCTA ? 'bg-green-50 border-green-200' : ''}`}>
+                        <h3 className={`font-semibold mb-3 capitalize ${isBody ? 'text-blue-900' : isCTA ? 'text-green-900' : 'text-gray-900'}`}>
+                          {typeDisplayNames[type] || `${type}s`} ({typeCopies.length})
                         </h3>
                         <div className="space-y-2">
                           {typeCopies.map((copy) => {
@@ -1123,6 +1107,14 @@ const AdsetEditor = () => {
                               : copy.content;
                             const isSaving = savingCopyIds.has(copy._id);
                             const isSaved = savedCopyIds.has(copy._id);
+                            
+                            // Determine textarea size based on type
+                            const isBody = type === 'body';
+                            const isCTA = type === 'cta';
+                            const minHeight = isBody ? '120px' : isCTA ? '60px' : '40px';
+                            const maxHeight = isBody ? '500px' : isCTA ? '200px' : '200px';
+                            const textSize = isBody ? 'text-base' : isCTA ? 'text-sm' : 'text-sm';
+                            const lineHeight = isBody ? 'leading-relaxed' : 'leading-normal';
                             
                             return (
                               <div
@@ -1134,17 +1126,17 @@ const AdsetEditor = () => {
                                     value={displayContent}
                                     onChange={(e) => {
                                       e.target.style.height = 'auto';
-                                      e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                                      e.target.style.height = `${Math.min(e.target.scrollHeight, parseInt(maxHeight))}px`;
                                       handleCopyContentChange(copy._id, e.target.value);
                                     }}
                                     onInput={(e) => {
                                       const target = e.target as HTMLTextAreaElement;
                                       target.style.height = 'auto';
-                                      target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                                      target.style.height = `${Math.min(target.scrollHeight, parseInt(maxHeight))}px`;
                                     }}
-                                    className="flex-1 text-sm text-gray-700 bg-white border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                                    style={{ minHeight: '40px', maxHeight: '200px' }}
-                                    rows={1}
+                                    className={`flex-1 ${textSize} ${lineHeight} text-gray-700 bg-white border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none`}
+                                    style={{ minHeight, maxHeight }}
+                                    rows={isBody ? 5 : isCTA ? 2 : 1}
                                   />
                                   <div className="flex items-start gap-2 flex-shrink-0">
                                     {isSaving && (
@@ -1195,12 +1187,12 @@ const AdsetEditor = () => {
             </div>
           )}
 
-          {/* Generated Assets Tab */}
+          {/* Assets Tab */}
           {activeTab === 'generated-assets' && (
             <div className="space-y-6">
-              {/* Base Assets Section */}
+              {/* Upload Section */}
               <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-xl font-semibold mb-4">Base Assets</h2>
+                <h2 className="text-xl font-semibold mb-4">Upload Assets</h2>
                 <p className="text-sm text-gray-600 mb-4">
                   Upload your base images and videos. These can be used to generate variants.
                 </p>
@@ -1268,55 +1260,6 @@ const AdsetEditor = () => {
                     </div>
                   </div>
                 </div>
-
-                {/* Generate Variants from Existing Assets */}
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-3">Generate Variants from Existing Assets</h3>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Select an existing asset (base or generated) to create AI variations.
-                  </p>
-                  {assets && assets.length > 0 ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                      {assets.map((asset) => (
-                        asset.type === 'image' ? (
-                          <div key={asset._id} className="relative group">
-                            <div
-                              className="cursor-pointer"
-                              onClick={() => setPreviewAsset(asset)}
-                            >
-                              <img
-                                src={`${API_URL}${asset.url}`}
-                                alt={asset.filename}
-                                className="w-full h-32 object-cover rounded-lg border-2 border-gray-200 group-hover:border-blue-500 transition-all"
-                              />
-                              <div className="absolute top-0 left-0 right-0 bottom-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity rounded-lg flex items-center justify-center">
-                                <span className="opacity-0 group-hover:opacity-100 text-white text-xs">Click to preview</span>
-                              </div>
-                            </div>
-                            <p className="mt-1 text-xs text-gray-600 truncate" title={asset.filename}>
-                              {asset.filename}
-                            </p>
-                            <button
-                              onClick={() => {
-                                setSelectedAssetForVariants(asset);
-                                setVariantCount(assetVariantCounts[asset._id] || 3);
-                                setVariantPrompt('');
-                                setShowVariantGenerator(true);
-                              }}
-                              disabled={generatingForAsset === asset._id}
-                              className="mt-2 w-full px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                              title="Generate variants"
-                            >
-                              Generate Variants
-                            </button>
-                          </div>
-                        ) : null
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">No assets available. Upload base assets first.</p>
-                  )}
-                </div>
               </div>
 
               {/* All Assets Section */}
@@ -1326,8 +1269,9 @@ const AdsetEditor = () => {
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                     {assets.map((asset) => (
                       <div key={asset._id} className="relative group">
+                        {/* Preview - Click on image */}
                         <div
-                          className="cursor-pointer"
+                          className="cursor-pointer relative"
                           onClick={() => setPreviewAsset(asset)}
                         >
                           {asset.type === 'image' ? (
@@ -1348,26 +1292,48 @@ const AdsetEditor = () => {
                         <p className="mt-1 text-xs text-gray-600 truncate" title={asset.filename}>
                           {asset.filename}
                         </p>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteAsset(asset._id);
-                          }}
-                          disabled={deleteAssetMutation.isPending}
-                          className="mt-2 w-full px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center gap-1 disabled:opacity-50"
-                          title="Delete asset"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Delete
-                        </button>
+                        
+                        {/* Action Buttons */}
+                        <div className="mt-2 flex gap-2">
+                          {/* Delete Icon Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAsset(asset._id);
+                            }}
+                            disabled={deleteAssetMutation.isPending}
+                            className="flex-1 px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center disabled:opacity-50"
+                            title="Delete asset"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                          
+                          {/* Generate Variations Button (only for images) */}
+                          {asset.type === 'image' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAssetForVariants(asset);
+                                setVariantCount(3);
+                                setVariantPrompt('');
+                                setShowVariantGenerator(true);
+                              }}
+                              disabled={generatingForAsset === asset._id}
+                              className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                              title="Generate variants"
+                            >
+                              {generatingForAsset === asset._id ? '...' : 'Variants'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-gray-500">
-                    <p>No assets yet. Upload base assets or generate new ones above.</p>
+                    <p>No assets yet. Upload assets or generate new ones above.</p>
                   </div>
                 )}
               </div>
@@ -1658,7 +1624,7 @@ const AdsetEditor = () => {
                   onClick={() => {
                     if (previewAsset.type === 'image') {
                       setSelectedAssetForVariants(previewAsset);
-                      setVariantCount(assetVariantCounts[previewAsset._id] || 3);
+                      setVariantCount(3);
                       setVariantPrompt('');
                       setShowVariantGenerator(true);
                       setPreviewAsset(null);
@@ -1714,12 +1680,6 @@ const AdsetEditor = () => {
                     <div>
                       <span className="font-medium">Size: </span>
                       {(previewAsset.metadata.size / 1024).toFixed(2)} KB
-                    </div>
-                  )}
-                  {previewAsset.metadata.mimeType && (
-                    <div>
-                      <span className="font-medium">Type: </span>
-                      {previewAsset.metadata.mimeType}
                     </div>
                   )}
                 </div>
