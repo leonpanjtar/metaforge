@@ -32,6 +32,8 @@ const AssetManager = () => {
   const [variantResults, setVariantResults] = useState<any>(null);
   const [assetVariantCounts, setAssetVariantCounts] = useState<Record<string, number>>({});
   const [generatingForAsset, setGeneratingForAsset] = useState<string | null>(null);
+  const [selectedPreview, setSelectedPreview] = useState<{ placement: string; item: any; index: number } | null>(null);
+  const [downloadingPreview, setDownloadingPreview] = useState<string | null>(null);
 
   const { data: assets, refetch } = useQuery<Asset[]>({
     queryKey: ['assets', adsetId],
@@ -78,6 +80,16 @@ const AssetManager = () => {
       };
     }) => {
       const response = await api.post('/ai/generate-variants-from-asset', data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+    },
+  });
+
+  const downloadPreviewMutation = useMutation({
+    mutationFn: async (data: { adsetId: string; previewHtml: string }) => {
+      const response = await api.post('/ai/download-image-from-preview', data);
       return response.data;
     },
     onSuccess: () => {
@@ -626,10 +638,42 @@ const AssetManager = () => {
                               {preview.data.map((item: any, idx: number) => (
                                 <div key={idx} className="bg-gray-50 p-3 rounded border">
                                   {item.body && (
-                                    <div 
-                                      className="text-xs mb-2"
-                                      dangerouslySetInnerHTML={{ __html: item.body }}
-                                    />
+                                    <div className="mb-2">
+                                      <div 
+                                        className="text-xs mb-2"
+                                        dangerouslySetInnerHTML={{ __html: item.body }}
+                                      />
+                                      <div className="flex gap-2 mt-2">
+                                        <button
+                                          onClick={() => setSelectedPreview({ placement, item, index: idx })}
+                                          className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                                        >
+                                          View Preview
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            if (!adsetId || !item.body) return;
+                                            const previewKey = `${placement}-${idx}`;
+                                            setDownloadingPreview(previewKey);
+                                            try {
+                                              await downloadPreviewMutation.mutateAsync({
+                                                adsetId,
+                                                previewHtml: item.body,
+                                              });
+                                              alert('Images saved to assets successfully!');
+                                            } catch (error: any) {
+                                              alert(error.response?.data?.error || 'Failed to download images');
+                                            } finally {
+                                              setDownloadingPreview(null);
+                                            }
+                                          }}
+                                          disabled={downloadingPreview === `${placement}-${idx}`}
+                                          className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                                        >
+                                          {downloadingPreview === `${placement}-${idx}` ? 'Downloading...' : 'Save to Assets'}
+                                        </button>
+                                      </div>
+                                    </div>
                                   )}
                                   {item.transformation_spec && (
                                     <div className="text-xs text-gray-600">
@@ -672,6 +716,75 @@ const AssetManager = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview Popup Modal */}
+      {selectedPreview && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          onClick={() => setSelectedPreview(null)}
+        >
+          <div
+            className="bg-white rounded-lg max-w-6xl w-full relative flex flex-col"
+            style={{ maxHeight: '90vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setSelectedPreview(null)}
+              className="absolute top-4 right-4 bg-black bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-opacity-75 z-10"
+            >
+              ×
+            </button>
+            <div className="p-4 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Preview: {selectedPreview.placement.replace(/_/g, ' ')}
+              </h3>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <div 
+                className="w-full"
+                style={{ minHeight: '400px' }}
+                dangerouslySetInnerHTML={{ __html: selectedPreview.item.body || '' }}
+              />
+            </div>
+            <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
+              <div className="text-sm text-gray-600">
+                {selectedPreview.item.transformation_spec && (
+                  <p>AI Transformations: {Object.keys(selectedPreview.item.transformation_spec).join(', ')}</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (!adsetId || !selectedPreview.item.body) return;
+                    setDownloadingPreview(`${selectedPreview.placement}-${selectedPreview.index}`);
+                    try {
+                      await downloadPreviewMutation.mutateAsync({
+                        adsetId,
+                        previewHtml: selectedPreview.item.body,
+                      });
+                      alert('Images saved to assets successfully!');
+                    } catch (error: any) {
+                      alert(error.response?.data?.error || 'Failed to download images');
+                    } finally {
+                      setDownloadingPreview(null);
+                    }
+                  }}
+                  disabled={downloadingPreview === `${selectedPreview.placement}-${selectedPreview.index}`}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  {downloadingPreview === `${selectedPreview.placement}-${selectedPreview.index}` ? 'Downloading...' : 'Save to Assets'}
+                </button>
+                <button
+                  onClick={() => setSelectedPreview(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -572,6 +572,211 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
   }
 };
 
+export const downloadImageFromPreview = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { adsetId, previewHtml } = req.body;
+
+    if (!adsetId) {
+      res.status(400).json({ error: 'Adset ID is required' });
+      return;
+    }
+
+    if (!previewHtml) {
+      res.status(400).json({ error: 'Preview HTML is required' });
+      return;
+    }
+
+    const { Asset } = await import('../models/Asset');
+    const { Adset } = await import('../models/Adset');
+    const { FileStorageService } = await import('../services/storage/FileStorageService');
+    const axios = require('axios');
+    // @ts-ignore - image-size doesn't have TypeScript types
+    const sizeOf = require('image-size');
+
+    // Verify adset ownership
+    const adset = await Adset.findOne({
+      _id: adsetId,
+      userId: req.userId,
+    });
+
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    // Extract iframe src URL from HTML
+    // Try multiple patterns to handle different HTML structures
+    let previewUrl: string | null = null;
+    
+    // Pattern 1: Standard iframe with src attribute
+    const iframeMatch1 = previewHtml.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+    if (iframeMatch1 && iframeMatch1[1]) {
+      previewUrl = iframeMatch1[1];
+    }
+    
+    // Pattern 2: Iframe with escaped quotes
+    if (!previewUrl) {
+      const iframeMatch2 = previewHtml.match(/<iframe[^>]+src=([^\s>]+)/i);
+      if (iframeMatch2 && iframeMatch2[1]) {
+        previewUrl = iframeMatch2[1].replace(/["']/g, '');
+      }
+    }
+    
+    // Pattern 3: Direct URL (if previewHtml is just a URL)
+    if (!previewUrl && previewHtml.startsWith('http')) {
+      previewUrl = previewHtml.trim();
+    }
+    
+    // Pattern 4: Look for business.facebook.com URLs in the HTML
+    if (!previewUrl) {
+      const urlMatch = previewHtml.match(/(https?:\/\/[^"'\s<>]+business\.facebook\.com[^"'\s<>]+)/i);
+      if (urlMatch && urlMatch[1]) {
+        previewUrl = urlMatch[1];
+      }
+    }
+
+    if (!previewUrl) {
+      res.status(400).json({ 
+        error: 'Could not extract preview URL from HTML',
+        details: 'The preview HTML does not contain a recognizable iframe or URL'
+      });
+      return;
+    }
+
+    console.log('[downloadImageFromPreview] Extracted preview URL:', previewUrl);
+
+    // Fetch the preview page HTML
+    const previewResponse = await axios.get(previewUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      timeout: 30000,
+    });
+
+    const previewPageHtml = previewResponse.data;
+    
+    // Extract image URLs from the preview page
+    // Meta preview pages typically contain image URLs in img tags or as background-image CSS
+    const imageUrlPatterns = [
+      // Standard img tags with file extensions
+      /<img[^>]+src=["']([^"']+\.(jpg|jpeg|png|gif|webp)[^"']*)["']/gi,
+      // Background-image CSS with file extensions
+      /background-image:\s*url\(["']?([^"')]+\.(jpg|jpeg|png|gif|webp)[^"')]*)["']?\)/gi,
+      // Facebook CDN URLs with extensions
+      /src=["'](https:\/\/[^"']+\.(fbcdn|facebook)\.net[^"']+\.(jpg|jpeg|png|gif|webp)[^"']*)["']/gi,
+      // Facebook CDN URLs without extensions (common pattern)
+      /src=["'](https:\/\/[^"']+\.(fbcdn|facebook)\.net\/[^"']*\/(?:[0-9]+_[0-9]+_[0-9]+|p[0-9]+x[0-9]+)[^"']*)["']/gi,
+      // Any https URL that looks like an image (has image-like path segments)
+      /src=["'](https:\/\/[^"']*\/(?:images?|photos?|media|assets?)[^"']*)["']/gi,
+    ];
+
+    const imageUrls = new Set<string>();
+    
+    for (const pattern of imageUrlPatterns) {
+      let match;
+      // Reset regex lastIndex to avoid issues with global regex
+      pattern.lastIndex = 0;
+      while ((match = pattern.exec(previewPageHtml)) !== null) {
+        const url = match[1];
+        // Filter out small icons/logos, focus on actual ad images
+        // Also filter out very small URLs (likely icons) and data URLs
+        if (url && 
+            !url.startsWith('data:') &&
+            !url.includes('icon') && 
+            !url.includes('logo') && 
+            !url.includes('avatar') &&
+            !url.includes('emoji') &&
+            url.length > 50) { // Filter out very short URLs (likely icons)
+          imageUrls.add(url);
+        }
+      }
+    }
+    
+    if (imageUrls.size === 0) {
+      res.status(404).json({ error: 'No image URLs found in preview page' });
+      return;
+    }
+
+    console.log(`[downloadImageFromPreview] Found ${imageUrls.size} image URLs to download`);
+
+    const fileStorageService = new FileStorageService();
+    const savedAssets = [];
+
+    // Download and save each image
+    for (const imageUrl of Array.from(imageUrls)) {
+      try {
+        console.log(`[downloadImageFromPreview] Downloading: ${imageUrl}`);
+        
+        // Download image
+        const imageResponse = await axios.get(imageUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        });
+
+        const buffer = Buffer.from(imageResponse.data, 'binary');
+        
+        // Get image dimensions
+        let metadata: any = {
+          size: buffer.length,
+          mimeType: imageResponse.headers['content-type'] || 'image/jpeg',
+        };
+
+        try {
+          const dimensions = sizeOf(buffer);
+          metadata.width = dimensions.width;
+          metadata.height = dimensions.height;
+        } catch (error) {
+          console.warn('Failed to get image dimensions:', error);
+        }
+
+        // Save file from buffer
+        const { filename, filepath, url } = await fileStorageService.saveFileFromBuffer(
+          buffer,
+          adsetId.toString(),
+          undefined,
+          imageResponse.headers['content-type'],
+          imageUrl
+        );
+
+        // Create asset record
+        const asset = new Asset({
+          adsetId,
+          type: 'image',
+          filename,
+          filepath,
+          url,
+          metadata,
+        });
+
+        await asset.save();
+        savedAssets.push(asset);
+        
+        console.log(`[downloadImageFromPreview] Saved asset: ${filename}`);
+      } catch (error: any) {
+        console.error(`[downloadImageFromPreview] Failed to download ${imageUrl}:`, error.message);
+        // Continue with other images even if one fails
+      }
+    }
+
+    if (savedAssets.length === 0) {
+      res.status(500).json({ error: 'Failed to download any images' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      savedCount: savedAssets.length,
+      assets: savedAssets,
+    });
+  } catch (error: any) {
+    console.error('Download image from preview error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download image from preview' });
+  }
+};
+
 export const generateCopy = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { adsetId, prompt, context, scrapedContent, config } = req.body;

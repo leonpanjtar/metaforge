@@ -8,6 +8,7 @@ import {
   generateMetaAIPreviews,
   generateVariantsFromAsset,
   analyzeCreative,
+  downloadImageFromPreview,
 } from '../controllers/aiController';
 import { authenticate } from '../middleware/auth';
 import multer from 'multer';
@@ -24,6 +25,7 @@ router.post('/generate-single-variation', authenticate, upload.single('image'), 
 router.post('/generate-meta-ai-previews', authenticate, generateMetaAIPreviews);
 router.post('/generate-variants-from-asset', authenticate, generateVariantsFromAsset);
 router.post('/analyze-creative', authenticate, analyzeCreative);
+router.post('/download-image-from-preview', authenticate, downloadImageFromPreview);
 
 export default router;
 
