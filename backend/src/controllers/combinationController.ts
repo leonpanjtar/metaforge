@@ -228,71 +228,156 @@ export const scoreCombinations = async (
       return;
     }
 
-    const scoringService = new ScoringService();
-    let scoredCount = 0;
-    let deletedCount = 0;
-    let keptCount = 0;
-    const deletedIds: string[] = [];
+    // Set up Server-Sent Events for progressive updates
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
 
-    // Score each combination
-    for (const combination of combinations) {
-      try {
-        // Get required components
-        const asset = Array.isArray(combination.assetIds) && combination.assetIds.length > 0
-          ? combination.assetIds[0] as any
-          : null;
-        const headline = combination.headlineId as any;
-        const body = combination.bodyId as any;
-        const description = combination.descriptionId as any;
-        const cta = combination.ctaId as any;
+    const sendSSE = (event: string, data: any) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
 
-        if (!asset || !headline || !body || !description || !cta) {
-          console.error(`Combination ${combination._id} is missing required components`);
-          continue;
+    try {
+      const scoringService = new ScoringService();
+      let scoredCount = 0;
+      let deletedCount = 0;
+      let keptCount = 0;
+      const deletedIds: string[] = [];
+      const total = combinations.length;
+
+      // Send initial progress
+      sendSSE('progress', {
+        type: 'started',
+        message: `Starting to score ${total} combinations...`,
+        progress: 0,
+        total: total,
+        scored: 0,
+        deleted: 0,
+        kept: 0,
+      });
+
+      // Score each combination one at a time
+      for (let i = 0; i < combinations.length; i++) {
+        const combination = combinations[i];
+        
+        try {
+          // Send progress update
+          sendSSE('progress', {
+            type: 'scoring',
+            message: `Scoring combination ${i + 1} of ${total}...`,
+            progress: i,
+            total: total,
+            currentIndex: i,
+            scored: scoredCount,
+            deleted: deletedCount,
+            kept: keptCount,
+          });
+
+          // Get required components
+          const asset = Array.isArray(combination.assetIds) && combination.assetIds.length > 0
+            ? combination.assetIds[0] as any
+            : null;
+          const headline = combination.headlineId as any;
+          const body = combination.bodyId as any;
+          const description = combination.descriptionId as any;
+          const cta = combination.ctaId as any;
+
+          if (!asset || !headline || !body || !description || !cta) {
+            console.error(`Combination ${combination._id} is missing required components`);
+            sendSSE('error', {
+              index: i,
+              combinationId: combination._id.toString(),
+              message: 'Missing required components',
+            });
+            continue;
+          }
+
+          // Score the combination
+          const scoring = await scoringService.scoreCombination(
+            asset,
+            headline,
+            body,
+            description,
+            cta,
+            adset as any
+          );
+
+          // Update combination with scores
+          combination.scores = scoring.scores;
+          combination.overallScore = scoring.overallScore;
+          combination.predictedCTR = scoring.predictedCTR;
+          await combination.save();
+
+          scoredCount++;
+
+          // Delete if score is below minimum
+          if (scoring.overallScore < minScore) {
+            await AdCombination.findByIdAndDelete(combination._id);
+            deletedCount++;
+            deletedIds.push(combination._id.toString());
+            
+            sendSSE('complete', {
+              type: 'deleted',
+              index: i,
+              combinationId: combination._id.toString(),
+              score: scoring.overallScore,
+              message: `Combination ${i + 1} scored ${scoring.overallScore} (deleted)`,
+              progress: i + 1,
+              total: total,
+              scored: scoredCount,
+              deleted: deletedCount,
+              kept: keptCount,
+            });
+          } else {
+            keptCount++;
+            
+            sendSSE('complete', {
+              type: 'kept',
+              index: i,
+              combinationId: combination._id.toString(),
+              score: scoring.overallScore,
+              message: `Combination ${i + 1} scored ${scoring.overallScore} (kept)`,
+              progress: i + 1,
+              total: total,
+              scored: scoredCount,
+              deleted: deletedCount,
+              kept: keptCount,
+            });
+          }
+        } catch (error: any) {
+          console.error(`Error scoring combination ${combination._id}:`, error);
+          sendSSE('error', {
+            index: i,
+            combinationId: combination._id.toString(),
+            message: error.message || 'Failed to score combination',
+          });
+          // Continue with next combination
         }
-
-        // Score the combination
-        const scoring = await scoringService.scoreCombination(
-          asset,
-          headline,
-          body,
-          description,
-          cta,
-          adset as any
-        );
-
-        // Update combination with scores
-        combination.scores = scoring.scores;
-        combination.overallScore = scoring.overallScore;
-        combination.predictedCTR = scoring.predictedCTR;
-        await combination.save();
-
-        scoredCount++;
-
-        // Delete if score is below minimum
-        if (scoring.overallScore < minScore) {
-          await AdCombination.findByIdAndDelete(combination._id);
-          deletedCount++;
-          deletedIds.push(combination._id.toString());
-        } else {
-          keptCount++;
-        }
-      } catch (error: any) {
-        console.error(`Error scoring combination ${combination._id}:`, error);
-        // Continue with next combination
       }
-    }
 
-    res.json({
-      success: true,
-      message: `Scored ${scoredCount} combinations. Deleted ${deletedCount} below score ${minScore}.`,
-      totalCombinations: combinations.length,
-      scored: scoredCount,
-      deleted: deletedCount,
-      kept: keptCount,
-      deletedIds: deletedIds,
-      minScore: minScore,
-    });
+      // Send final completion
+      sendSSE('done', {
+        success: true,
+        message: `Scored ${scoredCount} combinations. Deleted ${deletedCount} below score ${minScore}.`,
+        totalCombinations: total,
+        scored: scoredCount,
+        deleted: deletedCount,
+        kept: keptCount,
+        deletedIds: deletedIds,
+        minScore: minScore,
+      });
+
+      res.end();
+    } catch (error: any) {
+      console.error('Score combinations error:', error);
+      sendSSE('error', {
+        message: 'Failed to score combinations',
+        details: error.message || 'Unknown error during scoring',
+      });
+      res.end();
+    }
   } catch (error: any) {
     console.error('Score combinations error:', error);
     res.status(500).json({ error: error.message || 'Failed to score combinations' });

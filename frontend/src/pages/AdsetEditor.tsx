@@ -491,18 +491,133 @@ const AdsetEditor = () => {
     },
   });
 
-  // Score combinations mutation
+  // Score combinations state
+  const [scoringProgress, setScoringProgress] = useState<{
+    isScoring: boolean;
+    progress: number;
+    total: number;
+    scored: number;
+    deleted: number;
+    kept: number;
+    message: string;
+  }>({
+    isScoring: false,
+    progress: 0,
+    total: 0,
+    scored: 0,
+    deleted: 0,
+    kept: 0,
+    message: '',
+  });
+
+  // Score combinations mutation with SSE
   const scoreCombinationsMutation = useMutation({
     mutationFn: async (minScore?: number) => {
-      const response = await api.post(`/combinations/score/${adsetId}`, { minScore: minScore || 70 });
-      return response.data;
+      const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+      const token = localStorage.getItem('token');
+      
+      setScoringProgress({
+        isScoring: true,
+        progress: 0,
+        total: 0,
+        scored: 0,
+        deleted: 0,
+        kept: 0,
+        message: 'Starting...',
+      });
+
+      const response = await fetch(`${API_URL}/api/combinations/score/${adsetId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ minScore: minScore || 70 }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalResult: any = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            continue;
+          }
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.substring(6));
+              
+              if (data.type === 'started' || data.type === 'scoring') {
+                setScoringProgress(prev => ({
+                  ...prev,
+                  progress: data.progress || prev.progress,
+                  total: data.total || prev.total,
+                  message: data.message || prev.message,
+                  scored: data.scored || prev.scored,
+                  deleted: data.deleted || prev.deleted,
+                  kept: data.kept || prev.kept,
+                }));
+              } else if (data.type === 'complete') {
+                setScoringProgress(prev => ({
+                  ...prev,
+                  progress: data.progress || prev.progress,
+                  scored: data.scored || prev.scored,
+                  deleted: data.deleted || prev.deleted,
+                  kept: data.kept || prev.kept,
+                  message: data.message || prev.message,
+                }));
+              } else if (data.type === 'done') {
+                finalResult = data;
+                setScoringProgress(prev => ({
+                  ...prev,
+                  progress: data.total || prev.total,
+                  total: data.total || prev.total,
+                  scored: data.scored || prev.scored,
+                  deleted: data.deleted || prev.deleted,
+                  kept: data.kept || prev.kept,
+                  message: data.message || prev.message,
+                }));
+              } else if (data.type === 'error') {
+                console.error('Scoring error:', data);
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e);
+            }
+          }
+        }
+      }
+
+      if (!finalResult) {
+        throw new Error('No final result received');
+      }
+
+      return finalResult;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['combinations', adsetId] });
+      setScoringProgress(prev => ({ ...prev, isScoring: false }));
       alert(`Scored ${data.scored} combinations. Deleted ${data.deleted} below score ${data.minScore}.`);
     },
     onError: (error: any) => {
-      alert(`Failed to score combinations: ${error.response?.data?.error || error.message}`);
+      setScoringProgress(prev => ({ ...prev, isScoring: false }));
+      alert(`Failed to score combinations: ${error.message || 'Unknown error'}`);
     },
   });
 
@@ -1994,18 +2109,23 @@ const AdsetEditor = () => {
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h2 className="text-xl font-semibold">Ad Combinations ({combinations.length})</h2>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
                       <button
                         onClick={() => {
                           if (confirm('This will score all combinations and delete those below 70. Continue?')) {
                             scoreCombinationsMutation.mutate(70);
                           }
                         }}
-                        disabled={scoreCombinationsMutation.isPending}
+                        disabled={scoreCombinationsMutation.isPending || scoringProgress.isScoring}
                         className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 text-sm"
                       >
-                        {scoreCombinationsMutation.isPending ? 'Scoring...' : 'Score & Filter (≥70)'}
+                        {scoringProgress.isScoring ? `Scoring... (${scoringProgress.progress}/${scoringProgress.total})` : 'Score & Filter (≥70)'}
                       </button>
+                      {scoringProgress.isScoring && (
+                        <div className="text-xs text-gray-600">
+                          {scoringProgress.message} | Scored: {scoringProgress.scored} | Deleted: {scoringProgress.deleted} | Kept: {scoringProgress.kept}
+                        </div>
+                      )}
                       <button
                         onClick={() => {
                           // Select all
