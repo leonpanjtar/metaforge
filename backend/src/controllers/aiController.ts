@@ -412,7 +412,10 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
         process.env.API_URL ||
         'http://localhost:3001';
       const imageUrl = `${baseUrl}${asset.url}`;
-      console.log('[generateVariantsFromAsset] Using image URL for upload:', {
+      
+      console.log('[generateVariantsFromAsset] Environment check:', {
+        PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL,
+        API_URL: process.env.API_URL,
         baseUrl,
         assetUrl: asset.url,
         imageUrl,
@@ -422,6 +425,13 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
       const isLocalhost =
         imageUrl.includes('localhost') ||
         imageUrl.includes('127.0.0.1');
+      
+      console.log('[generateVariantsFromAsset] Localhost check:', {
+        isLocalhost,
+        imageUrl,
+        containsLocalhost: imageUrl.includes('localhost'),
+        contains127: imageUrl.includes('127.0.0.1'),
+      });
       
       if (isLocalhost) {
         // For localhost, we can't upload to Facebook, but we can still proceed
