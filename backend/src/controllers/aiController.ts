@@ -304,19 +304,179 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
       return;
     }
 
-    // Generate variations using OpenAI
-    let result;
+    // Set up Server-Sent Events for progressive loading
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+    const sendSSE = (event: string, data: any) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     try {
       const creativeGenerator = new CreativeGenerator();
-      result = await creativeGenerator.generateImageVariationsWithOpenAI(
+      
+      // Analyze image first
+      sendSSE('progress', { 
+        type: 'analyzing', 
+        message: 'Analyzing image...',
+        progress: 0,
+        total: variantCount
+      });
+
+      const analysis = await creativeGenerator.analyzeImageForVariations(
         file.buffer,
-        variantCount,
         instructions
       );
+
+      sendSSE('progress', { 
+        type: 'analyzed', 
+        message: 'Image analyzed. Starting generation...',
+        progress: 0,
+        total: variantCount,
+        analysis: analysis
+      });
+
+      // Generate variations one at a time
+      const fileStorageService = new FileStorageService();
+      const savedAssets: any[] = [];
+      const errors: string[] = [];
+
+      for (let i = 0; i < variantCount; i++) {
+        try {
+          sendSSE('progress', { 
+            type: 'generating', 
+            message: `Generating variation ${i + 1} of ${variantCount}...`,
+            progress: i,
+            total: variantCount,
+            currentIndex: i
+          });
+
+          // Generate single variation
+          const result = await creativeGenerator.generateImageVariationsWithOpenAI(
+            file.buffer,
+            1, // Generate one at a time
+            instructions
+          );
+
+          if (!result || result.imageUrls.length === 0) {
+            errors.push(`Variation ${i + 1}: No image generated`);
+            sendSSE('error', { 
+              index: i,
+              message: `Failed to generate variation ${i + 1}`
+            });
+            continue;
+          }
+
+          const imageData = result.imageUrls[0];
+          
+          sendSSE('progress', { 
+            type: 'processing', 
+            message: `Processing variation ${i + 1}...`,
+            progress: i,
+            total: variantCount,
+            currentIndex: i
+          });
+
+          let buffer: Buffer;
+          let mimeType = 'image/png';
+
+          // Handle base64 data URL (from gpt-image-1) or regular URL (fallback)
+          if (imageData.startsWith('data:image/')) {
+            const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
+            if (matches) {
+              mimeType = `image/${matches[1]}`;
+              const base64Data = matches[2];
+              buffer = Buffer.from(base64Data, 'base64');
+            } else {
+              throw new Error('Invalid base64 data URL format');
+            }
+          } else {
+            const imageResponse = await axios.get(imageData, {
+              responseType: 'arraybuffer',
+              timeout: 30000,
+            });
+            buffer = Buffer.from(imageResponse.data, 'binary');
+            mimeType = imageResponse.headers['content-type'] || 'image/png';
+          }
+
+          // Get image dimensions
+          let metadata: any = {
+            size: buffer.length,
+            mimeType: mimeType,
+          };
+
+          try {
+            const dimensions = sizeOf(buffer);
+            metadata.width = dimensions.width;
+            metadata.height = dimensions.height;
+          } catch (error) {
+            console.warn('Failed to get image dimensions:', error);
+          }
+
+          // Save file
+          const { filename, filepath, url } = await fileStorageService.saveFileFromBuffer(
+            buffer,
+            adsetId.toString(),
+            `gpt-image-variation-${Date.now()}-${i + 1}.png`,
+            mimeType,
+            undefined
+          );
+
+          // Create asset record
+          const asset = new Asset({
+            adsetId,
+            type: 'image',
+            filename,
+            filepath,
+            url,
+            metadata,
+          });
+
+          await asset.save();
+          savedAssets.push(asset);
+          
+          // Send completion event for this variation
+          sendSSE('complete', {
+            index: i,
+            asset: {
+              _id: asset._id,
+              filename: asset.filename,
+              url: asset.url,
+              metadata: asset.metadata
+            },
+            progress: i + 1,
+            total: variantCount
+          });
+
+          console.log(`[generateImageVariationsWithOpenAI] Saved asset: ${filename}`);
+        } catch (error: any) {
+          console.error(`[generateImageVariationsWithOpenAI] Failed to generate variation ${i + 1}:`, error.message);
+          errors.push(`Variation ${i + 1}: ${error.message}`);
+          sendSSE('error', { 
+            index: i,
+            message: `Failed to generate variation ${i + 1}: ${error.message}`
+          });
+        }
+      }
+
+      // Send final completion
+      sendSSE('done', {
+        success: true,
+        message: `Generated ${savedAssets.length} image variation(s)`,
+        assets: savedAssets,
+        count: savedAssets.length,
+        errors: errors.length > 0 ? errors : undefined,
+        analysis: analysis
+      });
+
+      res.end();
     } catch (error: any) {
       console.error('[generateImageVariationsWithOpenAI] Generation failed:', error);
-      res.status(500).json({ 
-        error: 'Failed to generate image variations',
+      sendSSE('error', {
+        message: 'Failed to generate image variations',
         details: error.message || 'Unknown error during image generation',
         hint: error.message?.includes('OPENAI_API_KEY') 
           ? 'Please check your OpenAI API key configuration'
@@ -324,111 +484,8 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
           ? 'OpenAI rate limit exceeded. Please try again later.'
           : 'Check server logs for more details'
       });
-      return;
+      res.end();
     }
-
-    if (!result || result.imageUrls.length === 0) {
-      console.error('[generateImageVariationsWithOpenAI] No images generated:', result);
-      res.status(500).json({ 
-        error: 'Failed to generate any image variations',
-        details: 'OpenAI did not return any generated images',
-        hint: 'This might be due to prompt issues or API rate limits. Try reducing the number of variants or simplifying instructions.'
-      });
-      return;
-    }
-
-    // Download and save generated images
-    const fileStorageService = new FileStorageService();
-    const savedAssets = [];
-
-    for (let i = 0; i < result.imageUrls.length; i++) {
-      try {
-        const imageData = result.imageUrls[i];
-        console.log(`[generateImageVariationsWithOpenAI] Processing variation ${i + 1}...`);
-
-        let buffer: Buffer;
-        let mimeType = 'image/png';
-
-        // Handle base64 data URL (from gpt-image-1) or regular URL (fallback)
-        if (imageData.startsWith('data:image/')) {
-          // Base64 data URL from gpt-image-1
-          const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
-          if (matches) {
-            mimeType = `image/${matches[1]}`;
-            const base64Data = matches[2];
-            buffer = Buffer.from(base64Data, 'base64');
-          } else {
-            throw new Error('Invalid base64 data URL format');
-          }
-        } else {
-          // Regular URL (fallback for compatibility)
-          console.log(`[generateImageVariationsWithOpenAI] Downloading from URL: ${imageData}`);
-          const imageResponse = await axios.get(imageData, {
-            responseType: 'arraybuffer',
-            timeout: 30000,
-          });
-          buffer = Buffer.from(imageResponse.data, 'binary');
-          mimeType = imageResponse.headers['content-type'] || 'image/png';
-        }
-
-        // Get image dimensions
-        let metadata: any = {
-          size: buffer.length,
-          mimeType: mimeType,
-        };
-
-        try {
-          const dimensions = sizeOf(buffer);
-          metadata.width = dimensions.width;
-          metadata.height = dimensions.height;
-        } catch (error) {
-          console.warn('Failed to get image dimensions:', error);
-        }
-
-        // Save file
-        const { filename, filepath, url } = await fileStorageService.saveFileFromBuffer(
-          buffer,
-          adsetId.toString(),
-          `gpt-image-variation-${i + 1}.png`,
-          mimeType,
-          undefined
-        );
-
-        // Create asset record
-        const asset = new Asset({
-          adsetId,
-          type: 'image',
-          filename,
-          filepath,
-          url,
-          metadata,
-        });
-
-        await asset.save();
-        savedAssets.push(asset);
-        
-        console.log(`[generateImageVariationsWithOpenAI] Saved asset: ${filename}`);
-      } catch (error: any) {
-        console.error(`[generateImageVariationsWithOpenAI] Failed to download variation ${i + 1}:`, error.message);
-        // Continue with other variations even if one fails
-      }
-    }
-
-    if (savedAssets.length === 0) {
-      res.status(500).json({ error: 'Failed to save any image variations' });
-      return;
-    }
-
-    res.json({
-      success: true,
-      message: `Generated ${savedAssets.length} image variation(s) using OpenAI gpt-image-1`,
-      assets: savedAssets,
-      count: savedAssets.length,
-      analysis: result.analysis,
-      prompts: result.prompts,
-      provider: 'openai',
-      model: 'gpt-image-1.5',
-    });
   } catch (error: any) {
     console.error('Generate image variations with OpenAI error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate image variations with OpenAI' });

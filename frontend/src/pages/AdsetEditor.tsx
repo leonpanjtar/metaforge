@@ -350,15 +350,135 @@ const AdsetEditor = () => {
   });
 
   // Generate variants mutation (OpenAI)
+  // State for progressive loading
+  const [generatingVariations, setGeneratingVariations] = useState<{
+    isGenerating: boolean;
+    progress: number;
+    total: number;
+    completedAssets: any[];
+    errors: string[];
+    message: string;
+  }>({
+    isGenerating: false,
+    progress: 0,
+    total: 0,
+    completedAssets: [],
+    errors: [],
+    message: '',
+  });
+
   const generateOpenAIVariantsMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const response = await api.post('/ai/generate-image-variations-openai', data, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+      const token = localStorage.getItem('token');
+      
+      // Use fetch with streaming for SSE
+      const response = await fetch(`${API_URL}/api/ai/generate-image-variations-openai`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          // Don't set Content-Type for FormData - browser will set it with boundary
+        },
+        body: data,
       });
-      return response.data;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(errorData.error || 'Failed to generate variations');
+      }
+
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const completedAssets: any[] = [];
+      const errors: string[] = [];
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            // Event type is in the line, but we parse it from data
+            continue;
+          }
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.substring(6));
+              
+              if (data.type === 'progress' || data.type === 'generating' || data.type === 'processing' || data.type === 'analyzing' || data.type === 'analyzed') {
+                setGeneratingVariations(prev => ({
+                  ...prev,
+                  progress: data.progress || 0,
+                  total: data.total || prev.total,
+                  message: data.message || '',
+                }));
+              } else if (data.type === 'complete') {
+                completedAssets.push(data.asset);
+                setGeneratingVariations(prev => ({
+                  ...prev,
+                  completedAssets: [...prev.completedAssets, data.asset],
+                  progress: data.progress || prev.progress,
+                }));
+              } else if (data.type === 'error') {
+                errors.push(data.message || 'Unknown error');
+                setGeneratingVariations(prev => ({
+                  ...prev,
+                  errors: [...prev.errors, data.message || 'Unknown error'],
+                }));
+              } else if (data.type === 'done') {
+                // Final result
+                return {
+                  success: true,
+                  assets: data.assets || completedAssets,
+                  count: data.count || completedAssets.length,
+                  errors: data.errors || errors,
+                };
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e);
+            }
+          }
+        }
+      }
+
+      return {
+        success: true,
+        assets: completedAssets,
+        count: completedAssets.length,
+        errors: errors,
+      };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+      setGeneratingVariations({
+        isGenerating: false,
+        progress: 0,
+        total: 0,
+        completedAssets: [],
+        errors: [],
+        message: '',
+      });
+    },
+    onError: () => {
+      setGeneratingVariations({
+        isGenerating: false,
+        progress: 0,
+        total: 0,
+        completedAssets: [],
+        errors: [],
+        message: '',
+      });
     },
   });
 
@@ -1598,6 +1718,72 @@ const AdsetEditor = () => {
                     ? `Generating ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI' : 'Meta AI'}...` 
                     : `Generate ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI gpt-image-1' : 'Meta AI'}`}
                 </button>
+
+                {/* Progressive Loading UI */}
+                {generatingVariations.isGenerating && variantProvider === 'openai' && (
+                  <div className="mt-6 space-y-4">
+                    <div className="text-sm font-medium text-gray-700">
+                      {generatingVariations.message || 'Generating variations...'} ({generatingVariations.progress}/{generatingVariations.total})
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      {Array.from({ length: generatingVariations.total }).map((_, index) => {
+                        const completedAsset = generatingVariations.completedAssets[index];
+                        const isGenerating = index === generatingVariations.progress && generatingVariations.progress < generatingVariations.total;
+                        const isCompleted = completedAsset !== undefined;
+                        const hasError = generatingVariations.errors.some(err => err.includes(`Variation ${index + 1}`));
+
+                        return (
+                          <div key={index} className="relative border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50" style={{ aspectRatio: '1' }}>
+                            {isCompleted ? (
+                              <img
+                                src={`${API_URL}${completedAsset.url}`}
+                                alt={`Variation ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center p-4">
+                                {isGenerating ? (
+                                  <>
+                                    <svg className="animate-spin h-8 w-8 text-blue-600 mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    <span className="text-xs text-gray-600">Generating...</span>
+                                  </>
+                                ) : hasError ? (
+                                  <>
+                                    <svg className="h-8 w-8 text-red-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span className="text-xs text-red-600">Error</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="w-16 h-16 border-2 border-dashed border-gray-300 rounded mb-2"></div>
+                                    <span className="text-xs text-gray-400">Waiting...</span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                              {index + 1}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {generatingVariations.errors.length > 0 && (
+                      <div className="bg-red-50 border border-red-200 rounded p-3">
+                        <p className="text-sm font-medium text-red-800 mb-1">Errors:</p>
+                        <ul className="text-xs text-red-700 list-disc list-inside">
+                          {generatingVariations.errors.map((error, idx) => (
+                            <li key={idx}>{error}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
