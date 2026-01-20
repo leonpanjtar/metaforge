@@ -20,6 +20,7 @@ interface Campaign {
 const Campaigns = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [reconnectLoading, setReconnectLoading] = useState(false);
 
   const { data: accounts, refetch: refetchAccounts } = useQuery<FacebookAccount[]>({
     queryKey: ['facebook-accounts'],
@@ -61,6 +62,32 @@ const Campaigns = () => {
     }
   }, [accounts, selectedAccountId]);
 
+  const handleReconnectFacebook = async () => {
+    if (!accounts || accounts.length === 0) return;
+
+    if (!window.confirm('This will clear your current Facebook connection(s) and start a fresh connect flow. Continue?')) {
+      return;
+    }
+
+    try {
+      setReconnectLoading(true);
+
+      // Disconnect all existing connected accounts for this user
+      await Promise.all(
+        accounts.map((account) =>
+          api.post(`/facebook/disconnect/${account._id}`)
+        )
+      );
+
+      // Start a fresh OAuth flow
+      const response = await api.get('/facebook/auth-url');
+      window.location.href = response.data.authUrl;
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to reconnect Facebook. Please try again.');
+      setReconnectLoading(false);
+    }
+  };
+
   return (
     <div className="px-4 py-6 sm:px-0">
       <div className="mb-6">
@@ -78,21 +105,33 @@ const Campaigns = () => {
 
       {accounts && accounts.length > 0 && (
         <>
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Facebook Account
-            </label>
-            <select
-              value={selectedAccountId}
-              onChange={(e) => setSelectedAccountId(e.target.value)}
-              className="block w-full max-w-md rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            >
-              {accounts.map((account) => (
-                <option key={account._id} value={account._id}>
-                  {account.accountName}
-                </option>
-              ))}
-            </select>
+          <div className="mb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Facebook Account
+              </label>
+              <select
+                value={selectedAccountId}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+                className="block w-full max-w-md rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              >
+                {accounts.map((account) => (
+                  <option key={account._id} value={account._id}>
+                    {account.accountName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={handleReconnectFacebook}
+                disabled={reconnectLoading}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              >
+                {reconnectLoading ? 'Reconnecting...' : 'Reconnect Facebook'}
+              </button>
+            </div>
           </div>
 
           {campaigns && campaigns.length > 0 ? (
