@@ -182,25 +182,53 @@ Return your analysis as JSON with these fields.`;
       const dimensions = sizeOf(imageBuffer);
       const aspectRatio = `${dimensions.width}:${dimensions.height}`;
 
-      const analysisPrompt = `Analyze this Facebook ad image in detail and provide a comprehensive description. Focus on:
+      const analysisPrompt = `You are analyzing a Facebook ad image for high-quality variation generation. This is CRITICAL for production-ready ads.
 
-1. Main subject and key elements
-2. Visual style (photography, illustration, graphic design, etc.)
-3. Color palette and dominant colors
-4. Composition and layout
-5. Any text elements and what they say (be precise with spelling)
-6. Mood and tone
-7. Background and setting
+Analyze this image with extreme precision:
 
-${userInstructions ? `\nUser wants variations with these instructions: ${userInstructions}` : ''}
+1. TEXT ELEMENTS (MOST IMPORTANT):
+   - Extract ALL text exactly as it appears, including punctuation, numbers, symbols
+   - Note the exact spelling, capitalization, and formatting
+   - Describe the font style, size, and color
+   - Note the position of each text element
+   - If there are numbers or currency symbols, capture them exactly (e.g., "€50K+", "90 DAYS")
+
+2. MAIN SUBJECT:
+   - Describe the person, product, or main focal point in detail
+   - Include clothing, pose, expression, positioning
+   - Note any props or objects they're holding/interacting with
+
+3. VISUAL STYLE:
+   - Photography style (professional, candid, studio, etc.)
+   - Lighting (bright, dramatic, soft, etc.)
+   - Color grading or filters
+   - Overall aesthetic (modern, classic, bold, etc.)
+
+4. COMPOSITION:
+   - Layout structure (where elements are positioned)
+   - Rule of thirds, symmetry, etc.
+   - Focal points and visual hierarchy
+
+5. BACKGROUND:
+   - Current background description
+   - What can be changed vs what must stay
+
+6. COLORS:
+   - Dominant colors and their hex codes if possible
+   - Color scheme (monochromatic, complementary, etc.)
+
+${userInstructions ? `\nUSER VARIATION INSTRUCTIONS: ${userInstructions}\nIdentify what should change vs what must remain identical.` : ''}
 
 Return your analysis as JSON with these fields:
-- description: Detailed description of the image
-- style: Visual style (e.g., "modern photography", "minimalist design", "vibrant illustration")
-- mainSubject: Main subject or focus of the image
-- colors: Array of dominant colors
-- textElements: Array of any text found in the image with exact spelling
-- composition: Description of layout and composition`;
+- description: Extremely detailed description of the entire image
+- style: Precise visual style description
+- mainSubject: Detailed description of main subject (person/product) with all visual details
+- colors: Array of dominant colors with descriptions
+- textElements: Array of objects with {text: "exact text", position: "where it is", style: "font style/color", size: "relative size"}
+- composition: Detailed layout description
+- background: Current background description
+- preserveElements: Array of elements that must remain identical
+- changeableElements: Array of elements that can be modified`;
 
       const response = await this.getClient().chat.completions.create({
         model: 'gpt-4o',
@@ -220,12 +248,23 @@ Return your analysis as JSON with these fields:
           },
         ],
         response_format: { type: 'json_object' },
-        max_tokens: 1000,
+        max_tokens: 2000, // Increased for more detailed analysis
       });
 
       const content = response.choices[0]?.message.content || '{}';
       const analysis = JSON.parse(content);
 
+      // Parse text elements - handle both string arrays and object arrays
+      let parsedTextElements: any[] = [];
+      if (analysis.textElements) {
+        parsedTextElements = analysis.textElements.map((item: any) => {
+          if (typeof item === 'string') {
+            return { text: item, position: 'unknown', style: 'unknown' };
+          }
+          return item;
+        });
+      }
+      
       return {
         description: analysis.description || 'A Facebook ad image',
         aspectRatio,
@@ -233,7 +272,11 @@ Return your analysis as JSON with these fields:
         style: analysis.style || 'modern',
         mainSubject: analysis.mainSubject || 'product',
         colors: analysis.colors || [],
-        textElements: analysis.textElements || [],
+        textElements: parsedTextElements,
+        composition: analysis.composition || '',
+        background: analysis.background || '',
+        preserveElements: analysis.preserveElements || [],
+        changeableElements: analysis.changeableElements || [],
       };
     } catch (error: any) {
       throw new Error(`Failed to analyze image: ${error.message}`);
@@ -284,59 +327,79 @@ Return your analysis as JSON with these fields:
       }
       // Otherwise use square (1:1)
 
-      // Step 3: Create variation prompts based on analysis and user instructions
+      // Step 3: Create variation prompts with production-quality specifications
       const variationPrompts: string[] = [];
       
+      // Extract text elements properly (handle both string arrays and object arrays)
+      const textElements = analysis.textElements || [];
+      const textStrings = textElements.map((item: any) => {
+        if (typeof item === 'string') return item;
+        return item.text || item;
+      });
+      
       for (let i = 0; i < count; i++) {
-        let prompt = `Create a high-quality Facebook ad image variation. `;
+        let prompt = `Create a production-ready, high-quality Facebook ad image. This must be professional marketing material suitable for paid advertising. `;
         
-        // Include original description
-        prompt += `${analysis.description}. `;
+        // Main subject - preserve exactly
+        prompt += `\n\nMAIN SUBJECT (MUST BE IDENTICAL):\n${analysis.mainSubject}\nThe person/product must look exactly the same: same pose, expression, clothing, positioning, and visual appearance. `;
         
-        // Include style
-        prompt += `Style: ${analysis.style}. `;
-        
-        // Include main subject
-        prompt += `Main subject: ${analysis.mainSubject}. `;
-        
-        // Include colors if available
-        if (analysis.colors.length > 0) {
-          prompt += `Color palette: ${analysis.colors.join(', ')}. `;
+        // Composition and layout
+        if (analysis.composition) {
+          prompt += `\nCOMPOSITION: ${analysis.composition}. Maintain this exact layout structure. `;
         }
         
-        // Include text elements with explicit instructions for clarity and readability
-        if (analysis.textElements.length > 0) {
-          prompt += `CRITICAL: Include the following text elements exactly as specified. Each text must be:
-- Clearly visible and prominently displayed
-- Correctly spelled (exact spelling: ${analysis.textElements.map((text: string) => `"${text}"`).join(', ')})
-- Normally readable with high contrast against background
-- In a professional, legible font
-- Properly sized for easy reading
-
-Text elements to include: ${analysis.textElements.map((text: string) => `"${text}"`).join(', ')}. `;
+        // Style preservation
+        prompt += `\nVISUAL STYLE (MUST MATCH): ${analysis.style}. Maintain the same lighting, color grading, and aesthetic quality. `;
+        
+        // CRITICAL: Text elements - most important part
+        if (textStrings.length > 0) {
+          prompt += `\n\n⚠️ CRITICAL TEXT REQUIREMENTS - THESE ARE MANDATORY:\n`;
+          prompt += `The following text MUST appear in the image EXACTLY as specified below. This is a Facebook ad, so text accuracy is essential.\n\n`;
+          
+          textStrings.forEach((text: string, idx: number) => {
+            prompt += `Text Element ${idx + 1}: "${text}"\n`;
+            prompt += `- Must be spelled EXACTLY as shown above\n`;
+            prompt += `- Must be clearly visible and readable\n`;
+            prompt += `- Must have high contrast against background\n`;
+            prompt += `- Must be in a professional, legible font\n`;
+            prompt += `- Must be properly sized for easy reading\n\n`;
+          });
+          
+          prompt += `FAILURE TO INCLUDE TEXT EXACTLY AS SPECIFIED WILL RESULT IN AN UNUSABLE AD. `;
         }
         
-        // Add user instructions
+        // Colors
+        if (analysis.colors && analysis.colors.length > 0) {
+          const colorList = analysis.colors.map((c: any) => typeof c === 'string' ? c : c.color || c).join(', ');
+          prompt += `\nCOLOR PALETTE: ${colorList}. `;
+        }
+        
+        // User instructions - what to change
         if (userInstructions) {
-          prompt += `Variation requirements: ${userInstructions}. `;
+          prompt += `\n\nVARIATION INSTRUCTIONS:\n${userInstructions}\n\n`;
+          prompt += `ONLY modify the elements specified above. Everything else must remain identical to the original. `;
         } else {
-          // Default variation instructions
+          // Default: change background only
           const variations = [
-            'Change the background while keeping the main subject',
-            'Modify the color scheme while maintaining brand consistency',
-            'Adjust the composition and layout',
+            'Change ONLY the background to a different professional setting (e.g., modern office, outdoor space, studio backdrop). Keep everything else identical.',
+            'Change ONLY the background colors and lighting while maintaining the same setting type. Keep all subjects and text identical.',
+            'Modify ONLY the background to a complementary professional environment. All subjects, text, and composition must remain identical.',
           ];
-          prompt += `Variation ${i + 1}: ${variations[i % variations.length]}. `;
+          prompt += `\n\nVARIATION INSTRUCTIONS:\n${variations[i % variations.length]}\n\n`;
         }
         
-        // Quality and text requirements - emphasize text clarity
-        prompt += `IMPORTANT REQUIREMENTS:
-- High quality, professional image
-- Preserve the original aspect ratio (${analysis.aspectRatio})
-- Any text must be clear, correctly spelled, and normally readable
-- Use high contrast for text to ensure readability
-- Maintain the visual style: ${analysis.style}
-- Keep the main subject: ${analysis.mainSubject}`;
+        // Quality requirements
+        prompt += `\nPRODUCTION QUALITY REQUIREMENTS:\n`;
+        prompt += `- Ultra-high quality, professional photography/design quality\n`;
+        prompt += `- Suitable for Facebook/Instagram paid advertising\n`;
+        prompt += `- Aspect ratio: ${analysis.aspectRatio} (must match exactly)\n`;
+        prompt += `- All text must be crystal clear and readable\n`;
+        prompt += `- Professional color grading and lighting\n`;
+        prompt += `- No artifacts, distortions, or quality issues\n`;
+        prompt += `- Marketing-ready quality suitable for high-budget ad campaigns\n`;
+        
+        // Final emphasis
+        prompt += `\nREMEMBER: This is a paid Facebook ad. Quality and text accuracy are critical. The image must be production-ready.`;
         
         variationPrompts.push(prompt);
       }
@@ -436,13 +499,22 @@ Text elements to include: ${analysis.textElements.map((text: string) => `"${text
           // Fallback to DALL-E 3 if gpt-image-1 fails or is not available
           if (!base64Image || useDalle3Fallback) {
             try {
-              console.log(`[CreativeGenerator] Using DALL-E 3 for variation ${i + 1}...`);
+              console.log(`[CreativeGenerator] Using DALL-E 3 HD for variation ${i + 1}...`);
+              
+              // Enhance prompt for DALL-E 3 with even more specific instructions
+              let dallePrompt = variationPrompts[i];
+              
+              // DALL-E 3 specific enhancements
+              if (textStrings.length > 0) {
+                dallePrompt += `\n\nTEXT ACCURACY IS CRITICAL: The following text must appear EXACTLY as written: ${textStrings.map((t: string) => `"${t}"`).join(', ')}. Each word must be correctly spelled and clearly readable.`;
+              }
+              
               const dalleResponse = await this.getClient().images.generate({
                 model: 'dall-e-3',
-                prompt: variationPrompts[i],
+                prompt: dallePrompt,
                 n: 1,
                 size: size,
-                quality: 'hd',
+                quality: 'hd', // Use HD quality for better results
                 response_format: 'url',
               });
 
