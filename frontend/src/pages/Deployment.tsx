@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import api from '../services/api';
+import { HiCursorClick, HiX } from 'react-icons/hi';
 
 const Deployment = () => {
   const { adsetId } = useParams<{ adsetId: string }>();
@@ -97,19 +98,23 @@ const Deployment = () => {
             </div>
           )}
 
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
             <button
               onClick={handleDeploy}
               disabled={deploying}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
+              aria-label="Deploy to Facebook"
+              title="Deploy to Facebook"
             >
-              {deploying ? 'Deploying...' : 'Deploy to Facebook'}
+              <HiCursorClick className="w-5 h-5" />
             </button>
             <button
               onClick={() => navigate(`/combinations/${adsetId}`)}
-              className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              className="p-2 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-50 flex items-center justify-center"
+              aria-label="Cancel"
+              title="Cancel"
             >
-              Cancel
+              <HiX className="w-5 h-5" />
             </button>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
+import { HiArrowTrendingUp, HiAdjustmentsHorizontal } from 'react-icons/hi2';
 
 interface Combination {
   _id: string;
@@ -119,15 +120,19 @@ const Combinations = () => {
             <div className="flex gap-2">
               <button
                 onClick={() => selectTopN(10)}
-                className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200"
+                className="p-2 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 flex items-center justify-center"
+                aria-label="Select top 10"
+                title="Select top 10"
               >
-                Select Top 10
+                <HiArrowTrendingUp className="w-4 h-4" />
               </button>
               <button
                 onClick={() => selectAboveScore(70)}
-                className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200"
+                className="p-2 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 flex items-center justify-center"
+                aria-label="Select above score 70"
+                title="Select above score 70"
               >
-                Select Above 70
+                <HiAdjustmentsHorizontal className="w-4 h-4" />
               </button>
             </div>
           </div>

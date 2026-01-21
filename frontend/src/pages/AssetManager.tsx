@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import FileUpload from '../components/FileUpload';
+import { HiTrash, HiSparkles, HiX } from 'react-icons/hi';
 
 interface Asset {
   _id: string;
@@ -375,10 +376,11 @@ const AssetManager = () => {
                           handleGenerateVariantsForAsset(asset._id);
                         }}
                         disabled={generatingForAsset === asset._id}
-                        className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                        className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
                         title="Generate AI variants"
+                        aria-label="Generate AI variants"
                       >
-                        {generatingForAsset === asset._id ? 'Generating...' : 'Generate'}
+                        {generatingForAsset === asset._id ? '...' : <HiSparkles className="w-4 h-4" />}
                       </button>
                       <button
                         onClick={(e) => {
@@ -387,27 +389,25 @@ const AssetManager = () => {
                         }}
                         className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center"
                         title="Delete asset"
+                        aria-label="Delete asset"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
+                        <HiTrash className="w-4 h-4" />
                       </button>
                     </div>
                   )}
                   {asset.type === 'video' && (
                     <div className="mt-2 flex justify-end z-10 relative" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(asset._id, e);
-                        }}
-                        className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center"
-                        title="Delete asset"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(asset._id, e);
+                      }}
+                      className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center"
+                      title="Delete asset"
+                      aria-label="Delete asset"
+                    >
+                      <HiTrash className="w-4 h-4" />
+                    </button>
                     </div>
                   )}
                 </div>
@@ -465,8 +465,10 @@ const AssetManager = () => {
             <button
               onClick={() => setPreviewAsset(null)}
               className="absolute top-4 right-4 bg-black bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-opacity-75 z-10"
+              aria-label="Close preview"
+              title="Close"
             >
-              ×
+              <HiX className="w-5 h-5" />
             </button>
             <div className="flex-1 flex items-center justify-center overflow-hidden" style={{ maxHeight: 'calc(90vh - 100px)' }}>
               {previewAsset.type === 'image' ? (
@@ -505,9 +507,11 @@ const AssetManager = () => {
                         e.stopPropagation();
                         setShowVariantGenerator(true);
                       }}
-                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                      className="p-2 bg-green-600 text-white rounded-full hover:bg-green-700 flex items-center justify-center"
+                      aria-label="Generate variants"
+                      title="Generate variants"
                     >
-                      Generate Variants
+                      <HiSparkles className="w-5 h-5" />
                     </button>
                   )}
                   <button
@@ -515,9 +519,11 @@ const AssetManager = () => {
                       e.stopPropagation();
                       handleDelete(previewAsset._id, e);
                     }}
-                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                    className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 flex items-center justify-center"
+                    aria-label="Delete asset"
+                    title="Delete asset"
                   >
-                    Delete
+                    <HiTrash className="w-5 h-5" />
                   </button>
                 </div>
               </div>
@@ -545,8 +551,10 @@ const AssetManager = () => {
                 setVariantResults(null);
               }}
               className="absolute top-4 right-4 bg-black bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-opacity-75 z-10"
+              aria-label="Close"
+              title="Close"
             >
-              ×
+              <HiX className="w-5 h-5" />
             </button>
             <div className="p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">

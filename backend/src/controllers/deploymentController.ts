@@ -4,6 +4,7 @@ import { AdCombination } from '../models/AdCombination';
 import { Adset } from '../models/Adset';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
+import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
 
 export const deployAds = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -27,7 +28,17 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    // Refresh token if needed before making API calls
+    await TokenRefreshService.checkAndRefreshToken(facebookAccount);
+    
+    // Get updated account (in case token was refreshed)
+    const updatedAccount = await FacebookAccount.findById(facebookAccount._id);
+    if (!updatedAccount) {
+      res.status(404).json({ error: 'Facebook account not found' });
+      return;
+    }
+
+    const apiService = new FacebookApiService(updatedAccount.accessToken);
     
     // Get Facebook Page ID (required for ad creation)
     let pageId: string | null = null;
@@ -164,7 +175,7 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
 
       try {
         facebookAdsetId = await apiService.createAdset(
-          `act_${facebookAccount.accountId}`,
+          `act_${updatedAccount.accountId}`,
           adsetData
         );
         console.log(`[deployAds] Created adset with ID: ${facebookAdsetId}`);
@@ -303,13 +314,36 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           },
         };
 
+        // Full ad request payload (what we send to Meta)
+        const adRequestPayload = {
+          ...creativeSpec,
+          status,
+        };
+
+        // Helpful logging so you can replay this in Meta Graph Explorer
+        console.log('[deployAds][GraphExplorer] Ad create request details:', {
+          endpoint: `/${facebookAdsetId}/ads`,
+          method: 'POST',
+          adsetId: facebookAdsetId,
+          campaignId: campaign.facebookCampaignId,
+          pageId,
+          landingPageUrl,
+          ctaType,
+          payload: adRequestPayload,
+        });
+
+        console.log(
+          '[deployAds][GraphExplorer] Example cURL (replace <ACCESS_TOKEN> before using):\n',
+          `curl -X POST "https://graph.facebook.com/v24.0/${facebookAdsetId}/ads" ` +
+            `-H "Authorization: Bearer <ACCESS_TOKEN>" ` +
+            `-H "Content-Type: application/json" ` +
+            `-d '${JSON.stringify(adRequestPayload)}'`
+        );
+
         // Create ad
         try {
           console.log(`[deployAds] Creating ad for combination ${combinationId} in adset ${facebookAdsetId}`);
-          const facebookAdId = await apiService.createAd(facebookAdsetId, {
-            ...creativeSpec,
-            status,
-          });
+          const facebookAdId = await apiService.createAd(facebookAdsetId, adRequestPayload);
           console.log(`[deployAds] Successfully created ad ${facebookAdId} for combination ${combinationId}`);
 
           combination.deployedToFacebook = true;

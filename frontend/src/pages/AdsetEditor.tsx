@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import FileUpload from '../components/FileUpload';
+import { HiTrash, HiPlus, HiX, HiSparkles, HiSelector, HiBan, HiCursorClick } from 'react-icons/hi';
 
 interface Adset {
   _id: string;
@@ -1517,9 +1518,11 @@ const AdsetEditor = () => {
                   <button
                     onClick={handleAddCustomCopy}
                     disabled={!customCopyInput.type || !customCopyInput.content.trim() || createCustomCopyMutation.isPending}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
+                    aria-label="Add custom copy"
+                    title="Add custom copy"
                   >
-                    Add
+                    <HiPlus className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -1624,10 +1627,11 @@ const AdsetEditor = () => {
                                     <button
                                       onClick={() => handleDeleteCopy(copy._id)}
                                       disabled={deleteCopyMutation.isPending}
-                                      className="opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-800 text-sm px-2 py-1 rounded transition-opacity"
-                                      title="Delete"
+                                      className="opacity-0 group-hover:opacity-100 text-red-600 hover:text-red-800 px-2 py-1 rounded transition-opacity flex items-center justify-center"
+                                      title="Delete copy"
+                                      aria-label="Delete copy"
                                     >
-                                      ×
+                                      <HiTrash className="w-4 h-4" />
                                     </button>
                                   </div>
                                 </div>
@@ -1764,10 +1768,9 @@ const AdsetEditor = () => {
                             disabled={deleteAssetMutation.isPending}
                             className="flex-1 px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center justify-center disabled:opacity-50"
                             title="Delete asset"
+                            aria-label="Delete asset"
                           >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
+                            <HiTrash className="w-4 h-4" />
                           </button>
                           
                           {/* Generate Variations Button (only for images) */}
@@ -1781,10 +1784,11 @@ const AdsetEditor = () => {
                                 setShowVariantGenerator(true);
                               }}
                               disabled={generatingForAsset === asset._id}
-                              className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                              className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
                               title="Generate variants"
+                              aria-label="Generate variants"
                             >
-                              {generatingForAsset === asset._id ? '...' : 'Variants'}
+                              {generatingForAsset === asset._id ? '...' : <HiSparkles className="w-4 h-4" />}
                             </button>
                           )}
                         </div>
@@ -2110,7 +2114,7 @@ const AdsetEditor = () => {
                   <div className="flex justify-between items-center">
                     <h2 className="text-xl font-semibold">Ad Combinations ({combinations.length})</h2>
                     <div className="flex gap-2 items-center">
-                      <button
+                      {/* <button
                         onClick={() => {
                           if (confirm('This will score all combinations and delete those below 70. Continue?')) {
                             scoreCombinationsMutation.mutate(70);
@@ -2120,36 +2124,42 @@ const AdsetEditor = () => {
                         className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 text-sm"
                       >
                         {scoringProgress.isScoring ? `Scoring... (${scoringProgress.progress}/${scoringProgress.total})` : 'Score & Filter (≥70)'}
-                      </button>
-                      {scoringProgress.isScoring && (
+                      </button> */}
+                      {/* {scoringProgress.isScoring && (
                         <div className="text-xs text-gray-600">
                           {scoringProgress.message} | Scored: {scoringProgress.scored} | Deleted: {scoringProgress.deleted} | Kept: {scoringProgress.kept}
                         </div>
-                      )}
+                      )} */}
                       <button
                         onClick={() => {
                           // Select all
                           setSelectedCombinations(new Set(combinations.map(c => c._id)));
                         }}
-                        className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                        className="p-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 flex items-center justify-center"
+                        aria-label="Select all combinations"
+                        title="Select all"
                       >
-                        Select All
+                        <HiSelector className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => {
                           // Deselect all
                           setSelectedCombinations(new Set());
                         }}
-                        className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                        className="p-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 flex items-center justify-center"
+                        aria-label="Deselect all combinations"
+                        title="Deselect all"
                       >
-                        Deselect All
+                        <HiBan className="w-4 h-4" />
                       </button>
                       <button
                         onClick={handleDeleteCombinationsBulk}
                         disabled={deleteCombinationsBulkMutation.isPending || selectedCombinations.size === 0}
-                        className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                        className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 disabled:opacity-50 flex items-center justify-center"
+                        aria-label={`Delete selected combinations (${selectedCombinations.size})`}
+                        title="Delete selected"
                       >
-                        {deleteCombinationsBulkMutation.isPending ? 'Deleting...' : `Delete Selected (${selectedCombinations.size})`}
+                        <HiTrash className="w-4 h-4" />
                       </button>
                       <select
                         id="deploy-status"
@@ -2172,9 +2182,11 @@ const AdsetEditor = () => {
                           handleDeploy(selectedIds, status);
                         }}
                         disabled={deployMutation.isPending}
-                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                        className="p-2 bg-green-600 text-white rounded-full hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
+                        aria-label={`Deploy selected combinations (${selectedCombinations.size})`}
+                        title="Deploy selected"
                       >
-                        {deployMutation.isPending ? 'Deploying...' : `Deploy Selected (${selectedCombinations.size})`}
+                        <HiCursorClick className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -2551,43 +2563,49 @@ const AdsetEditor = () => {
             style={{ maxHeight: '80vh' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-xl font-bold text-gray-900">
-                {previewAsset.filename}
-              </h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    if (previewAsset.type === 'image') {
-                      setSelectedAssetForVariants(previewAsset);
-                      setVariantCount(3);
-                      setVariantPrompt('');
-                      setShowVariantGenerator(true);
+              <div className="flex items-center justify-between p-4 border-b">
+                <h2 className="text-xl font-bold text-gray-900">
+                  {previewAsset.filename}
+                </h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (previewAsset.type === 'image') {
+                        setSelectedAssetForVariants(previewAsset);
+                        setVariantCount(3);
+                        setVariantPrompt('');
+                        setShowVariantGenerator(true);
+                        setPreviewAsset(null);
+                      }
+                    }}
+                    className="p-2 bg-green-600 text-white rounded-full hover:bg-green-700 flex items-center justify-center"
+                    aria-label="Generate variants"
+                    title="Generate variants"
+                  >
+                    <HiSparkles className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleDeleteAsset(previewAsset._id);
                       setPreviewAsset(null);
-                    }
-                  }}
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                >
-                  Generate Variants
-                </button>
-                <button
-                  onClick={() => {
-                    handleDeleteAsset(previewAsset._id);
-                    setPreviewAsset(null);
-                  }}
-                  disabled={deleteAssetMutation.isPending}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => setPreviewAsset(null)}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
-                >
-                  Close
-                </button>
+                    }}
+                    disabled={deleteAssetMutation.isPending}
+                    className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 disabled:opacity-50 flex items-center justify-center"
+                    aria-label="Delete asset"
+                    title="Delete asset"
+                  >
+                    <HiTrash className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => setPreviewAsset(null)}
+                    className="p-2 bg-gray-600 text-white rounded-full hover:bg-gray-700 flex items-center justify-center"
+                    aria-label="Close preview"
+                    title="Close"
+                  >
+                    <HiX className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
-            </div>
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-100">
               {previewAsset.type === 'image' ? (
                 <img

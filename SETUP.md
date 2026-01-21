@@ -110,3 +110,8 @@ npm run dev
 - OpenAI GPT-4 used for copy generation
 - DALL-E 3 used for image generation
 
+## Facebook Links
+
+https://developers.facebook.com/docs/marketing-api/creative/generative-ai-features/
+
+https://developers.facebook.com/docs/marketing-api/reference/ad-account/adimages/#Creating
