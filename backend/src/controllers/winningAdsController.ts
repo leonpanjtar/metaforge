@@ -13,23 +13,32 @@ import fs from 'fs/promises';
 
 // Helper to extract lead outcomes (OUTCOME_LEADS) from Facebook insights
 function extractLeadOutcomes(insights: any): number {
-  // Prefer outcome_results (outcome-based leads)
-  const outcomeResults = insights?.outcome_results;
-  if (Array.isArray(outcomeResults)) {
+  // 1) Some accounts expose a generic `results` field when objective = OUTCOME_LEADS
+  //    In that case, `results` already represents the number of leads.
+  const genericResults = Number(insights?.results ?? 0);
+  if (!Number.isNaN(genericResults) && genericResults > 0) {
+    return genericResults;
+  }
+
+  // 2) Some responses may include `objective_results` with per-objective breakdown
+  const objectiveResults = insights?.objective_results;
+  if (Array.isArray(objectiveResults)) {
     let total = 0;
-    for (const outcome of outcomeResults) {
-      const outcomeName = (outcome.outcome || '').toString().toLowerCase();
-      if (outcomeName.includes('lead')) {
-        const value = Number(outcome.value || 0);
+    for (const obj of objectiveResults) {
+      const name = (obj.name || obj.objective || '').toString().toLowerCase();
+      if (name.includes('lead')) {
+        const value = Number(obj.value || 0);
         if (!Number.isNaN(value)) {
           total += value;
         }
       }
     }
-    if (total > 0) return total;
+    if (total > 0) {
+      return total;
+    }
   }
 
-  // Fallback: look at actions with type containing 'lead'
+  // 3) Fallback: look at actions with type containing 'lead'
   const actions = insights?.actions;
   if (Array.isArray(actions)) {
     let total = 0;

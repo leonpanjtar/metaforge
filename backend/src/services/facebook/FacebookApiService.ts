@@ -341,8 +341,10 @@ export class FacebookApiService {
     try {
       const response = await this.api.get(`/${adId}/insights`, {
         params: {
-          // Include outcome_results so we can focus on OUTCOME_LEADS
-          fields: 'impressions,clicks,ctr,spend,actions,outcome_results',
+          // We rely on:
+          // - results / objective_results when objective = OUTCOME_LEADS
+          // - actions (with action_type containing 'lead') as a fallback
+          fields: 'impressions,clicks,ctr,spend,actions,results,objective_results',
           time_range: JSON.stringify(dateRange),
         },
       });

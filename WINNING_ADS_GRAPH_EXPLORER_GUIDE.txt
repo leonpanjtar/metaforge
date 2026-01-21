@@ -1,0 +1,458 @@
+================================================================================
+WINNING ADS - FACEBOOK GRAPH EXPLORER TESTING GUIDE
+================================================================================
+
+This guide walks you through testing the "Winning Ads" functionality using
+Facebook's Graph Explorer. The backend queries Facebook's API to find ads
+with OUTCOME_LEADS conversions and display their performance metrics.
+
+================================================================================
+PREREQUISITES
+================================================================================
+
+1. Access Token:
+   - Go to https://developers.facebook.com/tools/explorer/
+   - Select your Facebook App from the dropdown
+   - Click "Generate Access Token"
+   - Select permissions: ads_management, ads_read, business_management
+   - Copy the access token (you'll need it for all queries)
+
+2. Find Your Ad Account ID:
+   - In Graph Explorer, use: GET /me/adaccounts
+   - Look for your ad account ID (e.g., "act_1213336239619220")
+   - Note: The ID may or may not have the "act_" prefix
+
+3. Find Your Ad IDs:
+   - You need to know at least one ad ID that was deployed from your app
+   - Check your database's AdCombination collection for facebookAdId values
+   - Or use Step 3 below to list all ads
+
+================================================================================
+STEP 1: FIND CAMPAIGNS WITH OUTCOME_LEADS OBJECTIVE
+================================================================================
+
+Purpose: Find all campaigns that have OUTCOME_LEADS as their objective.
+These are the campaigns we care about for winning ads.
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{ad_account_id}/campaigns
+- Query Parameters:
+  * fields: id,name,objective,status
+  * access_token: {your_access_token}
+
+Example:
+GET https://graph.facebook.com/v24.0/act_1213336239619220/campaigns?fields=id,name,objective,status&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "data": [
+    {
+      "id": "120239925003970604",
+      "name": "My Lead Campaign",
+      "objective": "OUTCOME_LEADS",
+      "status": "ACTIVE"
+    },
+    {
+      "id": "120239925003970605",
+      "name": "Another Campaign",
+      "objective": "LINK_CLICKS",
+      "status": "ACTIVE"
+    }
+  ]
+}
+
+Note: Filter the results to only campaigns where objective === "OUTCOME_LEADS"
+
+================================================================================
+STEP 2: FIND ADSETS IN THOSE CAMPAIGNS
+================================================================================
+
+Purpose: Get all adsets within the OUTCOME_LEADS campaigns.
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{campaign_id}/adsets
+- Query Parameters:
+  * fields: id,name,status
+  * access_token: {your_access_token}
+
+Example:
+GET https://graph.facebook.com/v24.0/120239925003970604/adsets?fields=id,name,status&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "data": [
+    {
+      "id": "120239925003970606",
+      "name": "Adset 1",
+      "status": "ACTIVE"
+    },
+    {
+      "id": "120239925003970607",
+      "name": "Adset 2",
+      "status": "ACTIVE"
+    }
+  ]
+}
+
+================================================================================
+STEP 3: FIND ADS IN THOSE ADSETS
+================================================================================
+
+Purpose: Get all ads that were deployed in the adsets from Step 2.
+These are the ads we'll check for lead outcomes.
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{adset_id}/ads
+- Query Parameters:
+  * fields: id,name,status
+  * access_token: {your_access_token}
+
+Example:
+GET https://graph.facebook.com/v24.0/120239925003970606/ads?fields=id,name,status&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "data": [
+    {
+      "id": "120239925003970608",
+      "name": "Ad 1",
+      "status": "ACTIVE"
+    },
+    {
+      "id": "120239925003970609",
+      "name": "Ad 2",
+      "status": "PAUSED"
+    }
+  ]
+}
+
+Note: Save these ad IDs - you'll use them in Step 4.
+
+================================================================================
+STEP 4: GET AD INSIGHTS (THE MAIN QUERY)
+================================================================================
+
+Purpose: This is the CORE query used by the backend to find winning ads.
+It fetches performance metrics including lead outcomes (OUTCOME_LEADS).
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{ad_id}/insights
+- Query Parameters:
+  * fields: impressions,clicks,ctr,spend,actions,results,objective_results
+  * time_range: {"since":"2024-11-01","until":"2025-02-01"}
+  * access_token: {your_access_token}
+
+IMPORTANT: The time_range must be a JSON string, not an object!
+
+Example (for ad ID 120239925003970608):
+GET https://graph.facebook.com/v24.0/120239925003970608/insights?fields=impressions,clicks,ctr,spend,actions,results,objective_results&time_range={"since":"2024-11-01","until":"2025-02-01"}&access_token={YOUR_TOKEN}
+
+URL-Encoded Version (for copy-paste):
+GET https://graph.facebook.com/v24.0/120239925003970608/insights?fields=impressions,clicks,ctr,spend,actions,results,objective_results&time_range=%7B%22since%22%3A%222024-11-01%22%2C%22until%22%3A%222025-02-01%22%7D&access_token={YOUR_TOKEN}
+
+Expected Response (with leads):
+{
+  "data": [
+    {
+      "impressions": "15000",
+      "clicks": "450",
+      "ctr": "3.00",
+      "spend": "150.50",
+      "results": "25",
+      "objective_results": [
+        {
+          "name": "OUTCOME_LEADS",
+          "value": "25"
+        }
+      ],
+      "actions": [
+        {
+          "action_type": "link_click",
+          "value": "450"
+        },
+        {
+          "action_type": "lead",
+          "value": "25"
+        }
+      ]
+    }
+  ]
+}
+
+Expected Response (without leads):
+{
+  "data": [
+    {
+      "impressions": "5000",
+      "clicks": "100",
+      "ctr": "2.00",
+      "spend": "50.00",
+      "results": "0",
+      "objective_results": [],
+      "actions": [
+        {
+          "action_type": "link_click",
+          "value": "100"
+        }
+      ]
+    }
+  ]
+}
+
+How the Backend Processes This:
+1. First, it checks the generic `results` field — for OUTCOME_LEADS campaigns, this is often the number of leads.
+2. If `results` is not present or zero, it checks the `objective_results` array for entries where the name/objective contains "lead", summing their `value`.
+3. If both of those are missing or zero, it falls back to the `actions` array.
+4. In `actions`, it looks for entries where `action_type` contains "lead" and sums their `value`.
+5. If leads > 0, it calculates: costPerLead = spend / leads.
+6. Only ads with leads > 0 are included in the results.
+
+================================================================================
+STEP 5: TESTING DATE RANGES
+================================================================================
+
+The backend defaults to the last 3 months if no date range is provided.
+
+To test different date ranges, modify the time_range parameter:
+
+Last 7 days:
+time_range={"since":"2025-01-14","until":"2025-02-01"}
+
+Last 30 days:
+time_range={"since":"2025-01-02","until":"2025-02-01"}
+
+Last 3 months (default):
+time_range={"since":"2024-11-01","until":"2025-02-01"}
+
+Custom range:
+time_range={"since":"2024-01-01","until":"2024-12-31"}
+
+Date Format: YYYY-MM-DD (ISO 8601 date format)
+
+================================================================================
+STEP 6: GET AD DETAILS (FOR "VIEW DETAILS" FEATURE)
+================================================================================
+
+Purpose: Fetch detailed information about a specific ad, including its creative.
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{ad_id}
+- Query Parameters:
+  * fields: id,name,status,adset_id,creative{object_story_spec}
+  * access_token: {your_access_token}
+
+Example:
+GET https://graph.facebook.com/v24.0/120239925003970608?fields=id,name,status,adset_id,creative{object_story_spec}&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "id": "120239925003970608",
+  "name": "Ad 1",
+  "status": "ACTIVE",
+  "adset_id": "120239925003970606",
+  "creative": {
+    "id": "120239925003970610",
+    "object_story_spec": {
+      "link_data": {
+        "name": "Ad Headline",
+        "message": "Ad body text",
+        "description": "Ad description",
+        "link": "https://example.com/landing-page",
+        "image_hash": "abc123def456",
+        "call_to_action": {
+          "type": "LEARN_MORE",
+          "value": {
+            "link": "https://example.com/landing-page"
+          }
+        }
+      }
+    }
+  }
+}
+
+Note: The creative.id is needed for Step 7.
+
+================================================================================
+STEP 7: GET CREATIVE DETAILS (FOR IMPORT FEATURE)
+================================================================================
+
+Purpose: Get full creative details including image hash and CTA type.
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{creative_id}
+- Query Parameters:
+  * fields: id,name,object_story_spec
+  * access_token: {your_access_token}
+
+Example (using creative ID from Step 6):
+GET https://graph.facebook.com/v24.0/120239925003970610?fields=id,name,object_story_spec&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "id": "120239925003970610",
+  "name": "Creative Name",
+  "object_story_spec": {
+    "link_data": {
+      "name": "Ad Headline",
+      "message": "Ad body text",
+      "description": "Ad description",
+      "link": "https://example.com/landing-page",
+      "image_hash": "abc123def456",
+      "call_to_action": {
+        "type": "LEARN_MORE",
+        "value": {
+          "link": "https://example.com/landing-page"
+        }
+      }
+    }
+  }
+}
+
+================================================================================
+STEP 8: GET ADSET DETAILS (FOR TARGETING INFO)
+================================================================================
+
+Purpose: Get targeting information for an adset (used in "View Details").
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{adset_id}
+- Query Parameters:
+  * fields: id,name,status,targeting
+  * access_token: {your_access_token}
+
+Example:
+GET https://graph.facebook.com/v24.0/120239925003970606?fields=id,name,status,targeting&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "id": "120239925003970606",
+  "name": "Adset 1",
+  "status": "ACTIVE",
+  "targeting": {
+    "age_min": 25,
+    "age_max": 65,
+    "genders": [1, 2],
+    "geo_locations": {
+      "countries": ["US", "CA"]
+    },
+    "interests": [
+      {
+        "id": "6003107902433",
+        "name": "Outdoor recreation"
+      }
+    ],
+    "behaviors": [
+      {
+        "id": "6003020834693",
+        "name": "Small business owners"
+      }
+    ],
+    "publisher_platforms": ["facebook", "instagram"]
+  }
+}
+
+================================================================================
+STEP 9: GET IMAGE FROM IMAGE HASH (FOR IMPORT FEATURE)
+================================================================================
+
+Purpose: Download the actual image file using the image_hash from the creative.
+
+Graph Explorer Settings:
+- Method: GET
+- Path: v24.0/{ad_account_id}/adimages
+- Query Parameters:
+  * hashes: ['{image_hash}']
+  * access_token: {your_access_token}
+
+Example:
+GET https://graph.facebook.com/v24.0/act_1213336239619220/adimages?hashes=['abc123def456']&access_token={YOUR_TOKEN}
+
+Expected Response:
+{
+  "images": {
+    "abc123def456": {
+      "url": "https://scontent.xx.fbcdn.net/v/...",
+      "width": 1200,
+      "height": 628
+    }
+  }
+}
+
+Note: The URL in the response can be used to download the image file.
+
+================================================================================
+COMPLETE TESTING WORKFLOW
+================================================================================
+
+1. Get your access token from Graph Explorer
+2. Find your ad account ID: GET /me/adaccounts
+3. Find OUTCOME_LEADS campaigns: GET /{account_id}/campaigns?fields=id,name,objective
+4. For each campaign, find adsets: GET /{campaign_id}/adsets?fields=id,name
+5. For each adset, find ads: GET /{adset_id}/ads?fields=id,name
+6. For each ad, get insights: GET /{ad_id}/insights?fields=impressions,clicks,ctr,spend,actions,outcome_results&time_range={"since":"2024-11-01","until":"2025-02-01"}
+7. Check if outcome_results contains OUTCOME_LEADS with value > 0
+8. Calculate costPerLead = spend / leads
+9. Test "View Details": GET /{ad_id}?fields=id,name,status,adset_id,creative{object_story_spec}
+10. Test "Import": GET /{creative_id}?fields=id,name,object_story_spec
+
+================================================================================
+COMMON ISSUES & SOLUTIONS
+================================================================================
+
+Issue: "Invalid OAuth access token"
+Solution: Generate a new access token with ads_management permission
+
+Issue: "Tried accessing nonexisting field (insights) on node type"
+Solution: Make sure you're using an Ad ID, not an Adset ID or Campaign ID
+
+Issue: "outcome_results is empty"
+Solution: 
+- Check if the ad actually has OUTCOME_LEADS conversions in the date range
+- Try checking the actions array instead (fallback)
+- Verify the campaign objective is OUTCOME_LEADS
+
+Issue: "time_range parameter error"
+Solution: Make sure time_range is a JSON string, not an object:
+  Correct: time_range={"since":"2024-11-01","until":"2025-02-01"}
+  Wrong: time_range={since:"2024-11-01",until:"2025-02-01"}
+
+Issue: "No data returned"
+Solution:
+- Check if the ad has any impressions/clicks in the date range
+- Try expanding the date range
+- Verify the ad is ACTIVE or was ACTIVE during the date range
+
+================================================================================
+BACKEND IMPLEMENTATION NOTES
+================================================================================
+
+The backend code in winningAdsController.ts:
+
+1. Finds campaigns with objective matching /OUTCOME_LEADS/i
+2. Finds adsets within those campaigns
+3. Finds AdCombination records with deployedToFacebook=true and facebookAdId
+4. For each combination, calls getAdInsights(adId, dateRange)
+5. Extracts leads using extractLeadOutcomes() helper:
+   - First checks outcome_results for entries with "lead" in outcome name
+   - Falls back to actions array for entries with "lead" in action_type
+6. Filters out ads with leads <= 0
+7. Calculates costPerLead = spend / leads
+8. Sorts results by costPerLead ascending (best first)
+
+The exact API call made by the backend:
+GET https://graph.facebook.com/v24.0/{ad_id}/insights
+  ?fields=impressions,clicks,ctr,spend,actions,results,objective_results
+  &time_range={"since":"YYYY-MM-DD","until":"YYYY-MM-DD"}
+  &access_token={token}
+
+================================================================================
+END OF GUIDE
+================================================================================
+
