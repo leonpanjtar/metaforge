@@ -44,20 +44,23 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
       : `act_${updatedAccount.accountId}`;
     
     // Get Facebook Page ID (required for ad creation)
-    let pageId: string | null = null;
-    try {
-      const pages = await apiService.getPages();
-      if (pages && pages.length > 0) {
-        pageId = pages[0].id;
-      } else {
-        throw new Error('No Facebook pages found. Please connect a Facebook page to your account.');
+    // Prefer the page selected in adset.contentData.facebookPageId, fallback to first page
+    let pageId: string | null = (adset as any).contentData?.facebookPageId || null;
+    if (!pageId) {
+      try {
+        const pages = await apiService.getPages();
+        if (pages && pages.length > 0) {
+          pageId = pages[0].id;
+        } else {
+          throw new Error('No Facebook pages found. Please connect a Facebook page to your account.');
+        }
+      } catch (error: any) {
+        res.status(400).json({ 
+          error: 'Failed to get Facebook page',
+          details: error.message || 'Please ensure you have a connected Facebook page'
+        });
+        return;
       }
-    } catch (error: any) {
-      res.status(400).json({ 
-        error: 'Failed to get Facebook page',
-        details: error.message || 'Please ensure you have a connected Facebook page'
-      });
-      return;
     }
 
     // Create adset if not exists on Facebook (do this ONCE before the loop)
@@ -235,13 +238,21 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         }
 
         // Get landing page URL from combination or adset
-        const landingPageUrl = combination.url || (adset as any).contentData?.landingPageUrl || '';
+        let landingPageUrl = combination.url || (adset as any).contentData?.landingPageUrl || '';
         if (!landingPageUrl) {
           errors.push({ 
             combinationId, 
             error: 'Landing page URL is required. Please set it in Content Data or combination.' 
           });
           continue;
+        }
+
+        // Append UTM parameters for tracking in analytics
+        const utmTemplate =
+          'utm_source=meta&utm_medium={{placement}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}';
+        if (!landingPageUrl.includes('utm_source=meta')) {
+          const separator = landingPageUrl.includes('?') ? '&' : '?';
+          landingPageUrl = `${landingPageUrl}${separator}${utmTemplate}`;
         }
 
         // Get asset

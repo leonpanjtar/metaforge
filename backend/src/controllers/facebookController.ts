@@ -309,6 +309,41 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
   }
 };
 
+export const getPagesForCampaign = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { campaignId } = req.params;
+
+    const campaign = await Campaign.findOne({
+      _id: campaignId,
+      userId: req.userId,
+    });
+
+    if (!campaign) {
+      res.status(404).json({ error: 'Campaign not found' });
+      return;
+    }
+
+    const facebookAccount = await FacebookAccount.findById(
+      (campaign as any).facebookAccountId
+    );
+    if (!facebookAccount) {
+      res.status(404).json({ error: 'Facebook account not found' });
+      return;
+    }
+
+    // Refresh token if needed
+    await TokenRefreshService.checkAndRefreshToken(facebookAccount);
+
+    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const pages = await apiService.getPages();
+
+    res.json(pages);
+  } catch (error: any) {
+    console.error('Get pages for campaign error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch Facebook pages' });
+  }
+};
+
 export const disconnectAccount = async (
   req: AuthRequest,
   res: Response

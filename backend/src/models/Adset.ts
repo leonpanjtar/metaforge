@@ -48,6 +48,8 @@ export interface IAdset extends Document {
     keywords?: string[];
     importantThings?: string;
     baseAssets?: mongoose.Types.ObjectId[];
+    facebookPageId?: string;
+    facebookPageName?: string;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -118,6 +120,8 @@ const AdsetSchema = new Schema<IAdset>(
       keywords: { type: [String], default: [] },
       importantThings: { type: String, default: '' },
       baseAssets: [{ type: Schema.Types.ObjectId, ref: 'Asset' }],
+    facebookPageId: { type: String, default: '' },
+    facebookPageName: { type: String, default: '' },
     },
   },
   {

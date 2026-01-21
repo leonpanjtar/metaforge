@@ -15,6 +15,8 @@ interface Adset {
     keywords?: string[];
     importantThings?: string;
     baseAssets?: string[];
+    facebookPageId?: string;
+    facebookPageName?: string;
   };
 }
 
@@ -235,6 +237,7 @@ const AdsetEditor = () => {
   const [variantCount, setVariantCount] = useState(3);
   const [variantPrompt, setVariantPrompt] = useState('');
   const [variantProvider, setVariantProvider] = useState<'meta' | 'openai'>('openai');
+  const [selectedPageId, setSelectedPageId] = useState<string>('');
   
   // Text-to-image generation state
   const [textToImagePrompt, setTextToImagePrompt] = useState('');
@@ -254,6 +257,14 @@ const AdsetEditor = () => {
     enabled: !!adsetId,
   });
 
+  // Compute campaignId for this adset
+  const campaignName = adset && 'campaignId' in adset && adset.campaignId && typeof adset.campaignId === 'object' 
+    ? adset.campaignId.name 
+    : 'Campaign';
+  const campaignId = adset && 'campaignId' in adset && adset.campaignId
+    ? (typeof adset.campaignId === 'object' ? adset.campaignId._id : adset.campaignId)
+    : null;
+
   // Update form when adset data loads
   useEffect(() => {
     if (adset?.contentData) {
@@ -261,8 +272,20 @@ const AdsetEditor = () => {
       setAngle(adset.contentData.angle || '');
       setKeywords(adset.contentData.keywords || []);
       setImportantThings(adset.contentData.importantThings || '');
+      setSelectedPageId(adset.contentData.facebookPageId || '');
     }
   }, [adset]);
+
+  // Fetch Facebook Pages for the adset's campaign
+  const { data: pages } = useQuery<Array<{ id: string; name: string }>>({
+    queryKey: ['facebook-pages', campaignId],
+    queryFn: async () => {
+      if (!campaignId) return [];
+      const response = await api.get(`/facebook/pages/${campaignId}`);
+      return response.data;
+    },
+    enabled: !!campaignId,
+  });
 
   // Fetch assets
   const { data: assets, refetch: refetchAssets } = useQuery<Asset[]>({
@@ -878,6 +901,9 @@ const AdsetEditor = () => {
           angle: angle || '',
           keywords: keywords || [],
           importantThings: importantThings || '',
+          facebookPageId: selectedPageId || '',
+          facebookPageName:
+            (pages || []).find((p) => p.id === selectedPageId)?.name || '',
         },
       };
       console.log('Saving content data:', payload);
@@ -1013,13 +1039,6 @@ const AdsetEditor = () => {
     }
   };
 
-  const campaignName = adset && 'campaignId' in adset && adset.campaignId && typeof adset.campaignId === 'object' 
-    ? adset.campaignId.name 
-    : 'Campaign';
-  const campaignId = adset && 'campaignId' in adset && adset.campaignId
-    ? (typeof adset.campaignId === 'object' ? adset.campaignId._id : adset.campaignId)
-    : null;
-
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
 
   return (
@@ -1110,6 +1129,35 @@ const AdsetEditor = () => {
                 />
                 <p className="mt-1 text-xs text-gray-500">
                   URL to scrape for content inspiration
+                </p>
+              </div>
+
+              {/* Facebook Page Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Facebook Page
+                </label>
+                {pages && pages.length > 0 ? (
+                  <select
+                    value={selectedPageId}
+                    onChange={(e) => setSelectedPageId(e.target.value)}
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="">Select a page...</option>
+                    {pages.map((page) => (
+                      <option key={page.id} value={page.id}>
+                        {page.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-sm text-gray-500">
+                    No Facebook pages found. Make sure your Facebook account is connected
+                    and has pages accessible.
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  This page will be used for all ads in this adset.
                 </p>
               </div>
 

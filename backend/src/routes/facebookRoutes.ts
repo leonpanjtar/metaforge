@@ -6,6 +6,7 @@ import {
   getCampaigns,
   disconnectAccount,
   importFacebookAdsets,
+  getPagesForCampaign,
 } from '../controllers/facebookController';
 import { authenticate } from '../middleware/auth';
 
@@ -16,6 +17,7 @@ router.get('/callback', handleCallback); // No auth required - user comes from F
 router.get('/accounts', authenticate, getAccounts);
 router.get('/campaigns/:accountId', authenticate, getCampaigns);
 router.post('/campaigns/:campaignId/import-adsets', authenticate, importFacebookAdsets);
+router.get('/pages/:campaignId', authenticate, getPagesForCampaign);
 router.post('/disconnect/:accountId', authenticate, disconnectAccount);
 
 export default router;

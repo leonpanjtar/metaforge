@@ -199,6 +199,12 @@ export const updateAdset = async (req: AuthRequest, res: Response): Promise<void
         baseAssets: Array.isArray(updates.contentData.baseAssets)
           ? updates.contentData.baseAssets 
           : (Array.isArray(existingContentData.baseAssets) ? existingContentData.baseAssets : []),
+        facebookPageId: updates.contentData.facebookPageId !== undefined
+          ? String(updates.contentData.facebookPageId || '')
+          : String(existingContentData.facebookPageId || ''),
+        facebookPageName: updates.contentData.facebookPageName !== undefined
+          ? String(updates.contentData.facebookPageName || '')
+          : String(existingContentData.facebookPageName || ''),
       };
       
       console.log('Merged contentData:', JSON.stringify(newContentData, null, 2));
