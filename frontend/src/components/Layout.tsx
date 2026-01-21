@@ -8,6 +8,7 @@ const Layout = () => {
   const navItems = [
     { path: '/', label: 'Dashboard' },
     { path: '/campaigns', label: 'Campaigns' },
+    { path: '/winning-ads', label: 'Winning Ads' },
   ];
 
   return (

@@ -12,6 +12,7 @@ import adCopyRoutes from './routes/adCopyRoutes';
 import combinationRoutes from './routes/combinationRoutes';
 import deploymentRoutes from './routes/deploymentRoutes';
 import performanceRoutes from './routes/performanceRoutes';
+import winningAdsRoutes from './routes/winningAdsRoutes';
 import { startPerformanceSyncJob } from './jobs/performanceSyncJob';
 
 dotenv.config();
@@ -35,6 +36,7 @@ app.use('/api/ad-copies', adCopyRoutes);
 app.use('/api/combinations', combinationRoutes);
 app.use('/api/deployment', deploymentRoutes);
 app.use('/api/performance', performanceRoutes);
+app.use('/api/winning-ads', winningAdsRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

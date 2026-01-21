@@ -12,6 +12,7 @@ import CopyGenerator from './pages/CopyGenerator';
 import CreativeGenerator from './pages/CreativeGenerator';
 import Combinations from './pages/Combinations';
 import Deployment from './pages/Deployment';
+import WinningAds from './pages/WinningAds';
 import Performance from './pages/Performance';
 import Layout from './components/Layout';
 
@@ -56,6 +57,7 @@ function App() {
             <Route path="combinations/:adsetId" element={<Combinations />} />
             <Route path="deployment/:adsetId" element={<Deployment />} />
             <Route path="performance/:adsetId" element={<Performance />} />
+            <Route path="winning-ads" element={<WinningAds />} />
           </Route>
         </Routes>
       </BrowserRouter>
