@@ -11,21 +11,41 @@ import axios from 'axios';
 import path from 'path';
 import fs from 'fs/promises';
 
-// Helper to extract "Schedule" conversions from Facebook insights actions array
-function extractScheduleConversions(actions: any[] | undefined): number {
-  if (!actions || !Array.isArray(actions)) return 0;
-
-  let total = 0;
-  for (const action of actions) {
-    const type = (action.action_type || '').toString().toLowerCase();
-    if (type.includes('schedule')) {
-      const value = Number(action.value || 0);
-      if (!Number.isNaN(value)) {
-        total += value;
+// Helper to extract lead outcomes (OUTCOME_LEADS) from Facebook insights
+function extractLeadOutcomes(insights: any): number {
+  // Prefer outcome_results (outcome-based leads)
+  const outcomeResults = insights?.outcome_results;
+  if (Array.isArray(outcomeResults)) {
+    let total = 0;
+    for (const outcome of outcomeResults) {
+      const outcomeName = (outcome.outcome || '').toString().toLowerCase();
+      if (outcomeName.includes('lead')) {
+        const value = Number(outcome.value || 0);
+        if (!Number.isNaN(value)) {
+          total += value;
+        }
       }
     }
+    if (total > 0) return total;
   }
-  return total;
+
+  // Fallback: look at actions with type containing 'lead'
+  const actions = insights?.actions;
+  if (Array.isArray(actions)) {
+    let total = 0;
+    for (const action of actions) {
+      const type = (action.action_type || '').toString().toLowerCase();
+      if (type.includes('lead')) {
+        const value = Number(action.value || 0);
+        if (!Number.isNaN(value)) {
+          total += value;
+        }
+      }
+    }
+    return total;
+  }
+
+  return 0;
 }
 
 export const getWinningAds = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -94,14 +114,14 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
         const impressions = Number(insights.impressions || 0);
         const clicks = Number(insights.clicks || 0);
         const spend = Number(insights.spend || 0);
-        const schedules = extractScheduleConversions(insights.actions);
+        const leads = extractLeadOutcomes(insights);
 
-        if (schedules <= 0) {
-          // Skip ads without any "Schedule" conversions
+        if (leads <= 0) {
+          // Skip ads without any lead outcomes
           continue;
         }
 
-        const costPerSchedule = schedules > 0 ? spend / schedules : 0;
+        const costPerLead = leads > 0 ? spend / leads : 0;
 
         const adset = adsetMap.get(combo.adsetId.toString());
         const campaignForAdset = adset?.campaignId;
@@ -121,8 +141,8 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
           impressions,
           clicks,
           spend,
-          schedules,
-          costPerSchedule,
+          leads,
+          costPerLead,
           url: combo.url || adset?.contentData?.landingPageUrl || '',
           facebookAdLink,
           dateRange,
@@ -132,8 +152,8 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       }
     }
 
-    // Sort by cost per schedule ascending (best first)
-    results.sort((a, b) => a.costPerSchedule - b.costPerSchedule);
+    // Sort by cost per lead ascending (best first)
+    results.sort((a, b) => a.costPerLead - b.costPerLead);
 
     res.json({ ads: results });
   } catch (error: any) {

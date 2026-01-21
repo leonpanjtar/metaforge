@@ -13,8 +13,8 @@ interface WinningAd {
   impressions: number;
   clicks: number;
   spend: number;
-  schedules: number;
-  costPerSchedule: number;
+  leads: number;
+  costPerLead: number;
   url: string;
   facebookAdLink: string;
 }
@@ -123,9 +123,9 @@ const WinningAds = () => {
   return (
     <div className="px-4 py-6 sm:px-0">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Winning Ads (Schedule Conversions)</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Winning Ads (Lead Outcomes)</h1>
         <p className="mt-2 text-sm text-gray-600">
-          List ads with &quot;Schedule&quot; conversions in the selected period to detect winners.
+          List ads with lead outcomes (OUTCOME_LEADS) in the selected period to detect winners.
         </p>
       </div>
 
@@ -159,7 +159,7 @@ const WinningAds = () => {
 
       {!isLoading && !isError && ads.length === 0 && (
         <div className="bg-white p-6 rounded-lg shadow text-center text-gray-500">
-          No winning ads with &quot;Schedule&quot; conversions found in this period.
+          No winning ads with lead outcomes found in this period.
         </div>
       )}
 
@@ -170,8 +170,8 @@ const WinningAds = () => {
               <tr>
                 <th className="px-4 py-2 text-left font-medium text-gray-700">Campaign</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700">Adset</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700">Schedules</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-700">Cost / Schedule</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-700">Leads</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-700">Cost / Lead</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700">Spend</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700">Clicks</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-700">Impressions</th>
@@ -185,9 +185,9 @@ const WinningAds = () => {
                 <tr key={ad.facebookAdId} className="hover:bg-gray-50">
                   <td className="px-4 py-2 whitespace-nowrap">{ad.campaignName}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{ad.adsetName}</td>
-                  <td className="px-4 py-2 whitespace-nowrap font-semibold">{ad.schedules}</td>
+                  <td className="px-4 py-2 whitespace-nowrap font-semibold">{ad.leads}</td>
                   <td className="px-4 py-2 whitespace-nowrap">
-                    {ad.costPerSchedule > 0 ? ad.costPerSchedule.toFixed(2) : '-'}
+                    {ad.costPerLead > 0 ? ad.costPerLead.toFixed(2) : '-'}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">{ad.spend.toFixed(2)}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{ad.clicks}</td>
