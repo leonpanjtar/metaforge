@@ -1,0 +1,36 @@
+First create the creative:
+URL: https://graph.facebook.com/v23.0/act_1213336239619220/adcreatives
+{ 
+  "name": "{{ $json.CreativeId }} - {{$now}}",
+  "object_story_spec": 
+  { 
+    "page_id": "421190545370278", 
+    "instagram_user_id": "17841475930039546", 
+    "video_data": { 
+      "video_id": "{{ $json.FbId }}", 
+      "title": "{{ $('Start').item.json.Headline }}", 
+      "message": {{JSON.stringify($('Start').item.json.Script)}}, 
+      "link_description": "{{ $('Start').item.json.Description}}", 
+      "call_to_action": { 
+        "type": "LEARN_MORE", 
+        "value": { 
+          "link_caption": "salesqueze.com", 
+          "link": "{{ $('Start').item.json.URL }}" 
+        }
+      },
+      "image_url": "{{ $json.Thumbnail }}"
+    }
+  },
+"url_tags": "{{ $('Start').item.json.tracking_url }}"
+}
+
+The create the ad:
+URL: https://graph.facebook.com/v23.0/act_1213336239619220/ads
+{
+  "name": "{{ $('Start').item.json.Asset }}-{{ $('Split Out').item.json.CreativeId }}",
+  "adset_id": "{{ $('Start').item.json.Adset }}",
+  "creative": {
+    "creative_id": "{{ $json.id }}"
+  },
+  "status": "PAUSED"
+}

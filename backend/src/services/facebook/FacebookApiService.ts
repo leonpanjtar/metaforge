@@ -280,18 +280,50 @@ export class FacebookApiService {
     }
   }
 
-  async createAd(adsetId: string, adData: any): Promise<string> {
+  async createAdCreative(accountId: string, creativeData: any): Promise<string> {
+    try {
+      console.log('[FacebookApiService.createAdCreative] Request:', {
+        accountId,
+        creativeData: JSON.stringify(creativeData, null, 2),
+      });
+      const response = await this.api.post(`/${accountId}/adcreatives`, creativeData);
+      const creativeId = response.data.id;
+      console.log('[FacebookApiService.createAdCreative] Success:', {
+        creativeId,
+        response: response.data,
+      });
+      if (!creativeId) {
+        throw new Error('Ad creative creation succeeded but no ID was returned');
+      }
+      return creativeId;
+    } catch (error: any) {
+      const fbError = error.response?.data?.error;
+      console.error('[FacebookApiService.createAdCreative] Error:', {
+        message: fbError?.message || error.message,
+        code: fbError?.code,
+        type: fbError?.type,
+        errorSubcode: fbError?.error_subcode,
+        fullError: fbError,
+        requestData: creativeData,
+      });
+      throw new Error(
+        `Failed to create ad creative: ${fbError?.message || error.message}`
+      );
+    }
+  }
+
+  async createAd(accountId: string, adData: any): Promise<string> {
     try {
       console.log('[FacebookApiService.createAd] Request:', {
-        adsetId,
+        accountId,
         adData: JSON.stringify(adData, null, 2),
       });
-      const response = await this.api.post(`/${adsetId}/ads`, adData);
+      const response = await this.api.post(`/${accountId}/ads`, adData);
       return response.data.id;
     } catch (error: any) {
       const fbError = error.response?.data?.error;
       console.error('[FacebookApiService.createAd] Error:', {
-        adsetId,
+        accountId,
         message: fbError?.message || error.message,
         code: fbError?.code,
         type: fbError?.type,

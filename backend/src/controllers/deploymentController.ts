@@ -39,6 +39,9 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     const apiService = new FacebookApiService(updatedAccount.accessToken);
+    const accountIdWithPrefix = updatedAccount.accountId.startsWith('act_')
+      ? updatedAccount.accountId
+      : `act_${updatedAccount.accountId}`;
     
     // Get Facebook Page ID (required for ad creation)
     let pageId: string | null = null;
@@ -261,7 +264,7 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
               ? asset.url 
               : `${PUBLIC_BASE_URL}${asset.url}`;
             imageHash = await apiService.uploadAdImage(
-              `act_${facebookAccount.accountId}`,
+              accountIdWithPrefix,
               imageUrl
             );
             // Save hash to asset metadata for future use
@@ -297,7 +300,7 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         // Get CTA type from combination
         const ctaType = combination.ctaType || 'LEARN_MORE';
 
-        // Build creative spec
+        // Build creative spec (object_story_spec) used for the ad creative
         const creativeSpec = {
           object_story_spec: {
             page_id: pageId,
@@ -314,27 +317,69 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           },
         };
 
-        // Full ad request payload (what we send to Meta)
+        // Step 1: Create Ad Creative (act_{accountId}/adcreatives)
+        const creativePayload = {
+          name: `Ad Creative - ${adset.name || 'Adset'} - ${combination._id.toString()}`,
+          object_story_spec: creativeSpec.object_story_spec,
+        };
+
+        // Log creative payload for Meta Graph Explorer
+        console.log('[deployAds][GraphExplorer] Ad Creative create request details:', {
+          endpoint: `/${accountIdWithPrefix}/adcreatives`,
+          method: 'POST',
+          accountId: accountIdWithPrefix,
+          pageId,
+          landingPageUrl,
+          ctaType,
+          payload: creativePayload,
+        });
+
+        console.log(
+          '[deployAds][GraphExplorer] Example Ad Creative cURL (replace <ACCESS_TOKEN> before using):\n',
+          `curl -X POST "https://graph.facebook.com/v24.0/${accountIdWithPrefix}/adcreatives" ` +
+            `-H "Authorization: Bearer <ACCESS_TOKEN>" ` +
+            `-H "Content-Type: application/json" ` +
+            `-d '${JSON.stringify(creativePayload)}'`
+        );
+
+        let creativeId: string;
+        try {
+          console.log(`[deployAds] Creating ad creative for combination ${combinationId}`);
+          creativeId = await apiService.createAdCreative(accountIdWithPrefix, creativePayload);
+          console.log(`[deployAds] Created ad creative ${creativeId} for combination ${combinationId}`);
+        } catch (creativeError: any) {
+          console.error(`Failed to create ad creative for combination ${combinationId}:`, creativeError);
+          errors.push({
+            combinationId,
+            error: creativeError.message || 'Failed to create ad creative',
+          });
+          continue;
+        }
+
+        // Step 2: Create Ad (act_{accountId}/ads) referencing the creative and adset
         const adRequestPayload = {
-          ...creativeSpec,
+          name: `Ad - ${adset.name || 'Adset'} - ${combination._id.toString()}`,
+          adset_id: facebookAdsetId,
+          creative: {
+            creative_id: creativeId,
+          },
           status,
         };
 
         // Helpful logging so you can replay this in Meta Graph Explorer
         console.log('[deployAds][GraphExplorer] Ad create request details:', {
-          endpoint: `/${facebookAdsetId}/ads`,
+          endpoint: `/${accountIdWithPrefix}/ads`,
           method: 'POST',
+          accountId: accountIdWithPrefix,
           adsetId: facebookAdsetId,
           campaignId: campaign.facebookCampaignId,
-          pageId,
-          landingPageUrl,
-          ctaType,
+          creativeId,
           payload: adRequestPayload,
         });
 
         console.log(
-          '[deployAds][GraphExplorer] Example cURL (replace <ACCESS_TOKEN> before using):\n',
-          `curl -X POST "https://graph.facebook.com/v24.0/${facebookAdsetId}/ads" ` +
+          '[deployAds][GraphExplorer] Example Ad cURL (replace <ACCESS_TOKEN> before using):\n',
+          `curl -X POST "https://graph.facebook.com/v24.0/${accountIdWithPrefix}/ads" ` +
             `-H "Authorization: Bearer <ACCESS_TOKEN>" ` +
             `-H "Content-Type: application/json" ` +
             `-d '${JSON.stringify(adRequestPayload)}'`
@@ -343,7 +388,7 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         // Create ad
         try {
           console.log(`[deployAds] Creating ad for combination ${combinationId} in adset ${facebookAdsetId}`);
-          const facebookAdId = await apiService.createAd(facebookAdsetId, adRequestPayload);
+          const facebookAdId = await apiService.createAd(accountIdWithPrefix, adRequestPayload);
           console.log(`[deployAds] Successfully created ad ${facebookAdId} for combination ${combinationId}`);
 
           combination.deployedToFacebook = true;
