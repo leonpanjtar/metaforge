@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import multer from 'multer';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
@@ -6,6 +7,7 @@ import { Asset } from '../models/Asset';
 import { Adset } from '../models/Adset';
 import { AdCombination } from '../models/AdCombination';
 import { FileStorageService } from '../services/storage/FileStorageService';
+import { getAccountFilter, getAccountUserIds } from '../utils/accountFilter';
 // @ts-ignore - image-size doesn't have TypeScript types
 import sizeOf from 'image-size';
 
@@ -112,10 +114,20 @@ export const getAssets = async (req: AuthRequest, res: Response): Promise<void> 
   try {
     const { adsetId } = req.params;
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter - query by accountId first, then fallback to userId
+    const { getAccountFilter } = await import('../utils/accountFilter');
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -142,8 +154,11 @@ export const deleteAsset = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+    
     const adset = asset.adsetId as any;
-    if (adset.userId.toString() !== req.userId) {
+    if (!accountUserIds.includes(adset.userId.toString())) {
       res.status(403).json({ error: 'Unauthorized' });
       return;
     }

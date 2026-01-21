@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { Adset } from '../models/Adset';
 import { Campaign } from '../models/Campaign';
-import { getAccountFilter } from '../utils/accountFilter';
+import { getAccountFilter, getAccountUserIds } from '../utils/accountFilter';
 
 export const createAdset = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -16,11 +16,13 @@ export const createAdset = async (req: AuthRequest, res: Response): Promise<void
 
     // Get account filter
     const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
 
     const campaign = await Campaign.findOne({
       _id: campaignId,
-      userId: req.userId,
-      ...(accountFilter.accountId ? { accountId: accountFilter.accountId } : {}),
+      userId: { $in: accountUserIds },
     });
 
     if (!campaign) {
@@ -64,24 +66,53 @@ export const getAdsets = async (req: AuthRequest, res: Response): Promise<void> 
   try {
     const { campaignId } = req.query;
 
-    const query: any = { userId: req.userId };
+    // Get account filter - query by accountId first, then fallback to userId
+    const accountFilter = await getAccountFilter(req);
     
-    // Don't filter by accountId - return all adsets for the user
-    // This ensures backward compatibility with adsets that don't have accountId set
+    const query: any = {};
+    
+    // Query by accountId if available, otherwise fallback to userId for backward compatibility
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+      console.log(`[getAdsets] Querying by accountId:`, accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+      console.log(`[getAdsets] Querying by userId (fallback):`, accountFilter.userId);
+    }
     
     if (campaignId) {
       // Convert campaignId string to ObjectId
       try {
         query.campaignId = new mongoose.Types.ObjectId(campaignId as string);
+        console.log(`[getAdsets] Filtering by campaignId:`, campaignId);
       } catch (error) {
         res.status(400).json({ error: 'Invalid campaignId format' });
         return;
       }
     }
 
+    console.log(`[getAdsets] Final query:`, JSON.stringify({
+      ...query,
+      accountId: query.accountId ? query.accountId.toString() : undefined,
+      userId: query.userId ? query.userId.toString() : undefined,
+      campaignId: query.campaignId ? query.campaignId.toString() : undefined
+    }, null, 2));
+
     const adsets = await Adset.find(query)
       .populate('campaignId', 'name')
       .sort({ createdAt: -1 });
+
+    console.log(`[getAdsets] Found ${adsets.length} adsets`);
+    if (adsets.length > 0) {
+      console.log(`[getAdsets] Sample adset:`, {
+        _id: adsets[0]._id,
+        name: adsets[0].name,
+        userId: adsets[0].userId,
+        accountId: adsets[0].accountId,
+        campaignId: adsets[0].campaignId
+      });
+    }
 
     res.json(adsets);
   } catch (error: any) {
@@ -94,18 +125,13 @@ export const getAdset = async (req: AuthRequest, res: Response): Promise<void> =
   try {
     const { id } = req.params;
 
-    // Get account filter
-    const accountFilter = await getAccountFilter(req);
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
 
-    const query: any = {
+    const adset = await Adset.findOne({
       _id: id,
-      userId: req.userId,
-    };
-    if (accountFilter.accountId) {
-      query.accountId = accountFilter.accountId;
-    }
-
-    const adset = await Adset.findOne(query).populate('campaignId', 'name');
+      userId: { $in: accountUserIds },
+    }).populate('campaignId', 'name');
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });

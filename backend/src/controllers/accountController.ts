@@ -4,6 +4,8 @@ import { Account } from '../models/Account';
 import { UserAccount } from '../models/UserAccount';
 import { User } from '../models/User';
 import { Invitation } from '../models/Invitation';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 // Get all accounts for the current user
 export const getAccounts = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -318,9 +320,13 @@ export const inviteUserToAccount = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    // Check if user is already a member
-    const existingUser = await User.findOne({ email: email.trim().toLowerCase() });
+    const emailLower = email.trim().toLowerCase();
+    
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: emailLower });
+    
     if (existingUser) {
+      // User exists - check if already a member
       const existingMembership = await UserAccount.findOne({
         userId: existingUser._id,
         accountId: accountId,
@@ -330,12 +336,33 @@ export const inviteUserToAccount = async (req: AuthRequest, res: Response): Prom
         res.status(400).json({ error: 'User is already a member of this account' });
         return;
       }
+
+      // User exists but not a member - add them directly
+      const membership = new UserAccount({
+        userId: existingUser._id,
+        accountId: accountId,
+        role: role,
+      });
+      await membership.save();
+
+      res.json({
+        success: true,
+        message: 'User added to account successfully',
+        user: {
+          _id: existingUser._id,
+          email: existingUser.email,
+          name: existingUser.name,
+          role: role,
+        },
+        addedDirectly: true,
+      });
+      return;
     }
 
-    // Check if there's already a pending invitation for this email and account
+    // User doesn't exist - check if there's already a pending invitation
     const existingInvitation = await Invitation.findOne({
       accountId: accountId,
-      email: email.trim().toLowerCase(),
+      email: emailLower,
       status: 'pending',
       expiresAt: { $gt: new Date() },
     });
@@ -345,23 +372,27 @@ export const inviteUserToAccount = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    // Create invitation
+    // Generate unique token for invitation
+    const crypto = require('crypto');
+    const token = crypto.randomBytes(32).toString('hex');
+
+    // Create invitation for new user
     const invitation = new Invitation({
       accountId: accountId,
-      email: email.trim().toLowerCase(),
+      email: emailLower,
       role: role,
       invitedBy: req.userId,
+      token: token, // Generate token explicitly to avoid validation issues
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
     await invitation.save();
 
-    // TODO: Send invitation email here
-    // For now, we'll return the invitation with a token that can be used to accept it
-    // In production, you'd send an email with a link like: /accept-invitation?token=xxx
+    // TODO: Send invitation email here with link like: /accept-invitation?token=xxx
+    // In production, you'd send an email with the invitation link
 
     res.json({
       success: true,
-      message: 'Invitation sent successfully',
+      message: 'Invitation sent successfully. User will be added when they accept the invitation.',
       invitation: {
         _id: invitation._id,
         email: invitation.email,
@@ -369,6 +400,7 @@ export const inviteUserToAccount = async (req: AuthRequest, res: Response): Prom
         expiresAt: invitation.expiresAt,
         token: invitation.token, // In production, don't return token - send via email
       },
+      addedDirectly: false,
     });
   } catch (error: any) {
     console.error('Invite user to account error:', error);
@@ -401,7 +433,7 @@ export const getAccountInvitations = async (req: AuthRequest, res: Response): Pr
     const invitations = await Invitation.find({
       accountId: accountId,
       status: 'pending',
-    })
+    }).select('email role invitedBy expiresAt createdAt token')
       .populate('invitedBy', 'name email')
       .sort({ createdAt: -1 });
 
@@ -415,6 +447,7 @@ export const getAccountInvitations = async (req: AuthRequest, res: Response): Pr
       },
       expiresAt: inv.expiresAt,
       createdAt: inv.createdAt,
+      token: inv.token, // Include token so users can copy the invitation link
     }));
 
     res.json(result);
@@ -524,6 +557,142 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
   } catch (error: any) {
     console.error('Accept invitation error:', error);
     res.status(500).json({ error: error.message || 'Failed to process invitation' });
+  }
+};
+
+// Accept invitation and create account if needed (public endpoint)
+export const acceptInvitationAndCreateAccount = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { token } = req.body as { token?: string };
+
+    if (!token) {
+      res.status(400).json({ error: 'Invitation token is required' });
+      return;
+    }
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      res.status(500).json({ error: 'JWT_SECRET is not configured' });
+      return;
+    }
+
+    // Find invitation by token
+    const invitation = await Invitation.findOne({
+      token: token,
+      status: 'pending',
+    }).populate('accountId');
+
+    if (!invitation) {
+      res.status(404).json({ error: 'Invalid or expired invitation' });
+      return;
+    }
+
+    // Check if invitation has expired
+    if (invitation.expiresAt < new Date()) {
+      invitation.status = 'expired';
+      await invitation.save();
+      res.status(400).json({ error: 'Invitation has expired' });
+      return;
+    }
+
+    // Check if user already exists
+    let user = await User.findOne({ email: invitation.email });
+    let requiresPasswordSetup = false;
+
+    if (!user) {
+      // Create new user without password (will be set later)
+      user = new User({
+        email: invitation.email,
+        requiresPasswordSetup: true,
+      });
+      await user.save();
+      requiresPasswordSetup = true;
+    } else {
+      // Check if user needs password setup
+      requiresPasswordSetup = user.requiresPasswordSetup || false;
+    }
+
+    // Check if user is already a member
+    const existingMembership = await UserAccount.findOne({
+      userId: user._id,
+      accountId: invitation.accountId,
+    });
+
+    if (existingMembership) {
+      invitation.status = 'accepted';
+      await invitation.save();
+      res.status(400).json({ error: 'You are already a member of this account' });
+      return;
+    }
+
+    // Generate JWT token for the user
+    const authToken = jwt.sign({ userId: user._id.toString() }, jwtSecret, {
+      expiresIn: '7d',
+    });
+
+    res.json({
+      success: true,
+      token: authToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name || '',
+        requiresPasswordSetup: requiresPasswordSetup,
+      },
+      invitation: {
+        _id: invitation._id,
+        email: invitation.email,
+        role: invitation.role,
+        accountId: (invitation.accountId as any)._id,
+        accountName: (invitation.accountId as any).name,
+      },
+    });
+  } catch (error: any) {
+    console.error('Accept invitation and create account error:', error);
+    res.status(500).json({ error: error.message || 'Failed to accept invitation' });
+  }
+};
+
+// Setup password for user (after accepting invitation)
+export const setupPassword = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { password, name } = req.body;
+
+    if (!password || password.length < 6) {
+      res.status(400).json({ error: 'Password is required and must be at least 6 characters' });
+      return;
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+    user.passwordHash = passwordHash;
+    user.requiresPasswordSetup = false;
+
+    // Update name if provided
+    if (name && name.trim()) {
+      user.name = name.trim();
+    }
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password set successfully',
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+      },
+    });
+  } catch (error: any) {
+    console.error('Setup password error:', error);
+    res.status(500).json({ error: error.message || 'Failed to setup password' });
   }
 };
 

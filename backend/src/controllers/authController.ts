@@ -88,6 +88,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Check if user has a password set
+    if (!user.passwordHash) {
+      res.status(401).json({ 
+        error: 'Password not set. Please use the invitation link to set up your account.',
+        requiresPasswordSetup: true 
+      });
+      return;
+    }
+
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       res.status(401).json({ error: 'Invalid credentials' });
@@ -161,6 +170,7 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
       id: user._id,
       email: user.email,
       name: user.name,
+      requiresPasswordSetup: user.requiresPasswordSetup || false,
       accounts,
     });
   } catch (error) {

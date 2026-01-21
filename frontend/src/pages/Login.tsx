@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 const Login = () => {
-  const [isLogin, setIsLogin] = useState(true);
+  const [searchParams] = useSearchParams();
+  const [isLogin, setIsLogin] = useState(!searchParams.get('register'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -11,6 +12,8 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const { login, register } = useAuth();
   const navigate = useNavigate();
+  
+  const redirect = searchParams.get('redirect');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +31,8 @@ const Login = () => {
         }
         await register(email, password, name);
       }
-      navigate('/');
+      // Redirect to the specified URL or default to home
+      navigate(redirect || '/');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Authentication failed');
     } finally {
@@ -40,7 +44,9 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+          <h1 className="text-center text-4xl font-bold text-purple-600 mb-2">MetaForge</h1>
+          <p className="text-center text-sm text-gray-500 mb-6">Facebook Ads Management Platform</p>
+          <h2 className="text-center text-2xl font-semibold text-gray-900">
             {isLogin ? 'Sign in to your account' : 'Create your account'}
           </h2>
         </div>
@@ -108,7 +114,7 @@ const Login = () => {
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
             >
               {loading ? 'Loading...' : isLogin ? 'Sign in' : 'Sign up'}
             </button>
@@ -121,7 +127,7 @@ const Login = () => {
                 setIsLogin(!isLogin);
                 setError('');
               }}
-              className="text-sm text-blue-600 hover:text-blue-500"
+              className="text-sm text-purple-600 hover:text-purple-500"
             >
               {isLogin
                 ? "Don't have an account? Sign up"

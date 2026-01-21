@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
 import FacebookConnector from '../components/FacebookConnector';
 
@@ -18,10 +19,13 @@ interface Campaign {
 }
 
 const Campaigns = () => {
+  const { currentAccount } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [reconnectLoading, setReconnectLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('ACTIVE');
+  
+  const canManageFacebook = currentAccount && (currentAccount.role === 'owner' || currentAccount.role === 'admin');
 
   const { data: accounts, refetch: refetchAccounts } = useQuery<FacebookAccount[]>({
     queryKey: ['facebook-accounts'],
@@ -141,16 +145,18 @@ const Campaigns = () => {
                 </select>
               </div>
             )}
-            <div>
-              <button
-                type="button"
-                onClick={handleReconnectFacebook}
-                disabled={reconnectLoading}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                {reconnectLoading ? 'Reconnecting...' : 'Reconnect Facebook'}
-              </button>
-            </div>
+            {canManageFacebook && (
+              <div>
+                <button
+                  type="button"
+                  onClick={handleReconnectFacebook}
+                  disabled={reconnectLoading}
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {reconnectLoading ? 'Reconnecting...' : 'Reconnect Facebook'}
+                </button>
+              </div>
+            )}
           </div>
 
           {campaigns && campaigns.length > 0 ? (

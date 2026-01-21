@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
-import { HiUserPlus, HiEnvelope, HiPencil, HiXMark, HiTrash } from 'react-icons/hi2';
+import { HiEnvelope, HiPencil, HiXMark, HiTrash, HiClipboard, HiCheck } from 'react-icons/hi2';
 
 interface AccountMember {
   _id: string;
@@ -23,6 +23,7 @@ interface Invitation {
   };
   expiresAt: string;
   createdAt: string;
+  token?: string;
 }
 
 type Tab = 'members' | 'invitations';
@@ -32,10 +33,6 @@ const AccountManagement = () => {
   const { currentAccount, user } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('members');
   
-  // Add User states
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'admin' | 'member'>('member');
-  
   // Invite User states
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
@@ -44,6 +41,9 @@ const AccountManagement = () => {
   const [editingUser, setEditingUser] = useState<AccountMember | null>(null);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
+  
+  // Copy link state
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const { data: members, refetch: refetchMembers } = useQuery<AccountMember[]>({
     queryKey: ['account-members', accountId],
@@ -63,27 +63,43 @@ const AccountManagement = () => {
     enabled: !!accountId && (currentAccount?.role === 'owner' || currentAccount?.role === 'admin'),
   });
 
-  const addUserMutation = useMutation({
-    mutationFn: async (data: { email: string; role: string }) => {
-      const response = await api.post(`/accounts/${accountId}/members`, data);
-      return response.data;
-    },
-    onSuccess: () => {
-      refetchMembers();
-      setNewUserEmail('');
-      setNewUserRole('member');
-    },
-  });
-
   const inviteUserMutation = useMutation({
     mutationFn: async (data: { email: string; role: string }) => {
       const response = await api.post(`/accounts/${accountId}/invitations`, data);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: async (data) => {
       refetchInvitations();
+      refetchMembers(); // Refresh members in case user was added directly
       setInviteEmail('');
       setInviteRole('member');
+      if (data.addedDirectly) {
+        alert(`User ${data.user?.email} has been added to the account successfully!`);
+      } else {
+        if (data.invitation?.token) {
+          const inviteUrl = `${window.location.origin}/accept-invitation?token=${data.invitation.token}`;
+          const shouldCopy = window.confirm(
+            `Invitation created for ${data.invitation.email}.\n\nInvitation link:\n${inviteUrl}\n\nClick OK to copy the link to clipboard.`
+          );
+          if (shouldCopy) {
+            try {
+              await navigator.clipboard.writeText(inviteUrl);
+              alert('Invitation link copied to clipboard!');
+            } catch (err) {
+              // Fallback for older browsers
+              const textArea = document.createElement('textarea');
+              textArea.value = inviteUrl;
+              document.body.appendChild(textArea);
+              textArea.select();
+              document.execCommand('copy');
+              document.body.removeChild(textArea);
+              alert('Invitation link copied to clipboard!');
+            }
+          }
+        } else {
+          alert(`Invitation sent to ${data.invitation?.email}. They will be added when they accept the invitation.`);
+        }
+      }
     },
   });
 
@@ -130,20 +146,31 @@ const AccountManagement = () => {
     },
   });
 
-  const handleAddUser = () => {
-    if (!newUserEmail.trim()) {
-      alert('Please enter a user email');
-      return;
-    }
-    addUserMutation.mutate({ email: newUserEmail.trim(), role: newUserRole });
-  };
-
   const handleInviteUser = () => {
     if (!inviteEmail.trim()) {
       alert('Please enter an email address');
       return;
     }
     inviteUserMutation.mutate({ email: inviteEmail.trim(), role: inviteRole });
+  };
+
+  const handleCopyInviteLink = async (token: string) => {
+    const inviteUrl = `${window.location.origin}/accept-invitation?token=${token}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 2000);
+    } catch (err) {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = inviteUrl;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 2000);
+    }
   };
 
   const handleEditUser = (member: AccountMember) => {
@@ -216,32 +243,32 @@ const AccountManagement = () => {
       {/* Members Tab */}
       {activeTab === 'members' && (
         <>
-          {/* Add User Section */}
+          {/* Invite User Section */}
           {canManageUsers && (
             <div className="bg-white rounded-lg shadow mb-6 p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <HiUserPlus className="w-5 h-5" />
-                Add Existing User
+                <HiEnvelope className="w-5 h-5" />
+                Invite User
               </h2>
               <div className="flex gap-4">
                 <div className="flex-1">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    User Email
+                    Email Address
                   </label>
                   <input
                     type="email"
-                    value={newUserEmail}
-                    onChange={(e) => setNewUserEmail(e.target.value)}
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
                     placeholder="user@example.com"
                     className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                     onKeyPress={(e) => {
                       if (e.key === 'Enter') {
-                        handleAddUser();
+                        handleInviteUser();
                       }
                     }}
                   />
                   <p className="mt-1 text-xs text-gray-500">
-                    User must already have an account. They will receive immediate access.
+                    If the user already has an account, they'll be added immediately. Otherwise, they'll receive an invitation email.
                   </p>
                 </div>
                 <div className="w-48">
@@ -249,8 +276,8 @@ const AccountManagement = () => {
                     Role
                   </label>
                   <select
-                    value={newUserRole}
-                    onChange={(e) => setNewUserRole(e.target.value as 'admin' | 'member')}
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
                     className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   >
                     <option value="member">Member</option>
@@ -259,11 +286,11 @@ const AccountManagement = () => {
                 </div>
                 <div className="flex items-end">
                   <button
-                    onClick={handleAddUser}
-                    disabled={addUserMutation.isPending || !newUserEmail.trim()}
+                    onClick={handleInviteUser}
+                    disabled={inviteUserMutation.isPending || !inviteEmail.trim()}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
                   >
-                    {addUserMutation.isPending ? 'Adding...' : 'Add User'}
+                    {inviteUserMutation.isPending ? 'Inviting...' : 'Invite'}
                   </button>
                 </div>
               </div>
@@ -411,58 +438,6 @@ const AccountManagement = () => {
       {/* Invitations Tab */}
       {activeTab === 'invitations' && canManageUsers && (
         <>
-          {/* Invite User Section */}
-          <div className="bg-white rounded-lg shadow mb-6 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <HiEnvelope className="w-5 h-5" />
-              Invite New User
-            </h2>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="user@example.com"
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      handleInviteUser();
-                    }
-                  }}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  User will receive an invitation email. They can register or login to accept.
-                </p>
-              </div>
-              <div className="w-48">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Role
-                </label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                >
-                  <option value="member">Member</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={handleInviteUser}
-                  disabled={inviteUserMutation.isPending || !inviteEmail.trim()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {inviteUserMutation.isPending ? 'Sending...' : 'Send Invitation'}
-                </button>
-              </div>
-            </div>
-          </div>
-
           {/* Invitations List */}
           <div className="bg-white rounded-lg shadow">
             <div className="p-6">
@@ -509,17 +484,32 @@ const AccountManagement = () => {
                               {isExpired && <span className="ml-2 text-red-600">(Expired)</span>}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                              <button
-                                onClick={() => {
-                                  if (window.confirm('Cancel this invitation?')) {
-                                    cancelInvitationMutation.mutate(invitation._id);
-                                  }
-                                }}
-                                className="text-red-600 hover:text-red-900"
-                                title="Cancel invitation"
-                              >
-                                <HiXMark className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                {invitation.token && (
+                                  <button
+                                    onClick={() => handleCopyInviteLink(invitation.token!)}
+                                    className="text-blue-600 hover:text-blue-900"
+                                    title="Copy invitation link"
+                                  >
+                                    {copiedToken === invitation.token ? (
+                                      <HiCheck className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <HiClipboard className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('Cancel this invitation?')) {
+                                      cancelInvitationMutation.mutate(invitation._id);
+                                    }
+                                  }}
+                                  className="text-red-600 hover:text-red-900"
+                                  title="Cancel invitation"
+                                >
+                                  <HiXMark className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -536,13 +526,6 @@ const AccountManagement = () => {
       )}
 
       {/* Error Messages */}
-      {addUserMutation.isError && (
-        <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800">
-            {(addUserMutation.error as any)?.response?.data?.error || 'Failed to add user'}
-          </p>
-        </div>
-      )}
       {inviteUserMutation.isError && (
         <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-800">

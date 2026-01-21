@@ -83,9 +83,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
 
     console.log(`[getDashboardStats] Fetching stats for user ${req.userId}, date range: ${sinceStr} to ${untilStr}`);
 
-    // Get all active Facebook accounts for the user
+    // Get all active Facebook accounts for all users in the account
+    const { getAccountUserIds } = await import('../utils/accountFilter');
+    const accountUserIds = await getAccountUserIds(req);
+    
     const facebookAccounts = await FacebookAccount.find({
-      userId: req.userId,
+      userId: { $in: accountUserIds },
       isActive: true,
     });
 
@@ -434,9 +437,12 @@ export const getFacebookConnectionStatus = async (req: AuthRequest, res: Respons
       canManageConnection = true;
     }
 
-    // Get all Facebook accounts for the user
+    // Get all Facebook accounts for all users in the account
+    const { getAccountUserIds } = await import('../utils/accountFilter');
+    const accountUserIds = await getAccountUserIds(req);
+    
     const facebookAccounts = await FacebookAccount.find({
-      userId: req.userId,
+      userId: { $in: accountUserIds },
     });
 
     // Check if any account is active

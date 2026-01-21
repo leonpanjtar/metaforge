@@ -21,8 +21,9 @@ const Layout = () => {
     { path: '/winning-ads', label: 'Winning Ads' },
   ];
 
-  // Add account management link if user has a current account
-  if (currentAccount) {
+  // Add account management link if user has a current account and is admin/owner
+  const canManageUsers = currentAccount && (currentAccount.role === 'owner' || currentAccount.role === 'admin');
+  if (canManageUsers && currentAccount) {
     navItems.push({ path: `/account/${currentAccount._id}`, label: 'User Management' });
   }
 
@@ -126,7 +127,7 @@ const Layout = () => {
                           </button>
                         ))}
                         <div className="border-t border-gray-200 mt-2 pt-2 space-y-1">
-                          {currentAccount && (
+                          {canManageUsers && currentAccount && (
                             <button
                               onClick={() => {
                                 navigate(`/account/${currentAccount._id}`);

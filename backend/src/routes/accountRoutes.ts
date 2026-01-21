@@ -11,6 +11,8 @@ import {
   getAccountInvitations,
   cancelInvitation,
   acceptInvitation,
+  acceptInvitationAndCreateAccount,
+  setupPassword,
   completeInvitationAcceptance,
   updateUserProfile,
 } from '../controllers/accountController';
@@ -32,7 +34,11 @@ router.delete('/:accountId/invitations/:invitationId', authenticate, cancelInvit
 router.post('/invitations/accept', (req, res, next) => {
   acceptInvitation(req, res).catch(next);
 });
+router.post('/invitations/accept-and-create', (req, res, next) => {
+  acceptInvitationAndCreateAccount(req, res).catch(next);
+});
 router.post('/invitations/complete', authenticate, completeInvitationAcceptance);
+router.post('/setup-password', authenticate, setupPassword);
 
 // User profile routes
 router.put('/users/:userId', authenticate, updateUserProfile);

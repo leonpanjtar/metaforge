@@ -260,10 +260,13 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       until: untilStr,
     };
 
-    // Find an active Facebook account for this user
+    // Find an active Facebook account for any user in the account
+    const { getAccountUserIds } = await import('../utils/accountFilter');
+    const accountUserIds = await getAccountUserIds(req);
+    
     const facebookAccount =
-      (await FacebookAccount.findOne({ userId: req.userId, isActive: true })) ||
-      (await FacebookAccount.findOne({ userId: req.userId }));
+      (await FacebookAccount.findOne({ userId: { $in: accountUserIds }, isActive: true })) ||
+      (await FacebookAccount.findOne({ userId: { $in: accountUserIds } }));
     if (!facebookAccount) {
       res.status(400).json({ error: 'Facebook account not found for user' });
       return;

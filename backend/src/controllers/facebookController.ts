@@ -1,10 +1,13 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { Campaign } from '../models/Campaign';
 import { UserSettings } from '../models/UserSettings';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
 import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
+import { getAccountUserIds, getAccountFilter } from '../utils/accountFilter';
+import { UserAccount } from '../models/UserAccount';
 
 export const getAuthUrl = (req: AuthRequest, res: Response): void => {
   const appId = process.env.FACEBOOK_APP_ID;
@@ -16,8 +19,13 @@ export const getAuthUrl = (req: AuthRequest, res: Response): void => {
     return;
   }
 
-  // Include user ID in state parameter so we know which user is connecting
-  const state = Buffer.from(req.userId || '').toString('base64');
+  // Include user ID and account ID in state parameter
+  const accountId = req.headers['x-account-id'] as string;
+  const stateData = {
+    userId: req.userId || '',
+    accountId: accountId || '',
+  };
+  const state = Buffer.from(JSON.stringify(stateData)).toString('base64');
   const authUrl = `https://www.facebook.com/v24.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&state=${state}`;
 
   res.json({ authUrl });
@@ -35,11 +43,20 @@ export const handleCallback = async (
       return;
     }
 
-    // Extract user ID from state parameter
+    // Extract user ID and account ID from state parameter
     let userId: string | undefined;
+    let organizationAccountId: string | undefined;
     if (state) {
       try {
-        userId = Buffer.from(state as string, 'base64').toString('utf-8');
+        const decoded = Buffer.from(state as string, 'base64').toString('utf-8');
+        try {
+          const stateData = JSON.parse(decoded);
+          userId = stateData.userId;
+          organizationAccountId = stateData.accountId;
+        } catch {
+          // Fallback: treat as plain user ID (backward compatibility)
+          userId = decoded;
+        }
       } catch (error) {
         // If state decoding fails, try using it directly
         userId = state as string;
@@ -108,6 +125,10 @@ export const handleCallback = async (
         existingAccount.tokenExpiry = tokenExpiry;
         existingAccount.accountName = account.name;
         existingAccount.isActive = true;
+        // Update organizationAccountId if provided
+        if (organizationAccountId) {
+          existingAccount.organizationAccountId = organizationAccountId as any;
+        }
         await existingAccount.save();
         savedAccounts.push(existingAccount);
       } else {
@@ -118,6 +139,7 @@ export const handleCallback = async (
           tokenExpiry,
           accountName: account.name,
           isActive: true,
+          organizationAccountId: organizationAccountId as any,
         });
         await newAccount.save();
         savedAccounts.push(newAccount);
@@ -136,15 +158,19 @@ export const handleCallback = async (
 
 export const getAccounts = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+    
+    // Fetch Facebook accounts from all users in the account
     const accounts = await FacebookAccount.find({
-      userId: req.userId,
+      userId: { $in: accountUserIds },
       isActive: true,
-    }).select('-accessToken');
+    }).select('-accessToken').populate('userId', 'name email');
 
     res.json(accounts);
   } catch (error: any) {
     console.error('Get accounts error:', error);
-    res.status(500).json({ error: 'Failed to fetch accounts' });
+    res.status(500).json({ error: error.message || 'Failed to fetch accounts' });
   }
 };
 
@@ -152,8 +178,12 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
   try {
     const { accountId } = req.params;
 
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
     const facebookAccount = await FacebookAccount.findOne({
-      userId: req.userId,
+      userId: { $in: accountUserObjectIds },
       _id: accountId,
     });
 
@@ -174,16 +204,23 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
     const apiService = new FacebookApiService(facebookAccount.accessToken);
     const campaigns = await apiService.getCampaigns(`act_${facebookAccount.accountId}`);
 
+    // Get account filter to set accountId on campaigns
+    const campaignAccountFilter = await getAccountFilter(req);
+
     // Sync campaigns to database
+    // Use facebookCampaignId + facebookAccountId as unique key to prevent duplicates
     for (const campaign of campaigns) {
+      // Check if campaign already exists for this Facebook account (prevents duplicates across users)
       const existingCampaign = await Campaign.findOne({
-        userId: req.userId,
+        facebookAccountId: facebookAccount._id,
         facebookCampaignId: campaign.id,
       });
 
       if (!existingCampaign) {
+        // Create new campaign
         await Campaign.create({
           userId: req.userId,
+          accountId: campaignAccountFilter.accountId,
           facebookAccountId: facebookAccount._id,
           facebookCampaignId: campaign.id,
           name: campaign.name,
@@ -191,17 +228,29 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
           status: campaign.status,
         });
       } else {
+        // Update existing campaign
         existingCampaign.name = campaign.name;
         existingCampaign.objective = campaign.objective;
         existingCampaign.status = campaign.status;
+        // Update accountId if not set (for backward compatibility)
+        if (!existingCampaign.accountId && campaignAccountFilter.accountId) {
+          existingCampaign.accountId = campaignAccountFilter.accountId as any;
+        }
         await existingCampaign.save();
       }
     }
 
-    const dbCampaigns = await Campaign.find({
-      userId: req.userId,
-      facebookAccountId: accountId,
-    });
+    // Get campaigns from the account (query by accountId first, then fallback to userId)
+    const campaignQuery: any = { facebookAccountId: accountId };
+    
+    if (campaignAccountFilter.accountId) {
+      campaignQuery.accountId = new mongoose.Types.ObjectId(campaignAccountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      campaignQuery.userId = { $in: accountUserObjectIds };
+    }
+    
+    const dbCampaigns = await Campaign.find(campaignQuery);
 
     res.json(dbCampaigns);
   } catch (error: any) {
@@ -214,9 +263,16 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
   try {
     const { campaignId } = req.params;
 
+    // Get account filter to set accountId on imported adsets
+    const accountFilter = await getAccountFilter(req);
+
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
     const campaign = await Campaign.findOne({
       _id: campaignId,
-      userId: req.userId,
+      userId: { $in: accountUserObjectIds },
     });
 
     if (!campaign) {
@@ -246,7 +302,7 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
 
     // Get all existing adsets for this campaign that have a facebookAdsetId
     const existingAdsets = await Adset.find({
-      userId: req.userId,
+      userId: { $in: accountUserObjectIds },
       campaignId: campaign._id,
       facebookAdsetId: { $exists: true, $ne: null },
     });
@@ -261,9 +317,9 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
     }
 
     for (const fbAdset of facebookAdsets) {
-      // Check if already exists
+      // Check if already exists (from any user in the account)
       const existing = await Adset.findOne({
-        userId: req.userId,
+        userId: { $in: accountUserObjectIds },
         facebookAdsetId: fbAdset.id,
       });
 
@@ -307,6 +363,11 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
           existing.lifetimeBudget = adsetDetails.lifetime_budget ? adsetDetails.lifetime_budget / 100 : existing.lifetimeBudget;
           existing.startTime = adsetDetails.start_time;
           existing.endTime = adsetDetails.end_time;
+          
+          // Update accountId if not set (for backward compatibility)
+          if (!existing.accountId && accountFilter.accountId) {
+            existing.accountId = accountFilter.accountId as any;
+          }
 
           await existing.save();
           updatedAdsets.push(existing);
@@ -344,6 +405,7 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
 
         const newAdset = new Adset({
           userId: req.userId,
+          accountId: accountFilter.accountId,
           campaignId: campaign._id,
           facebookAdsetId: fbAdset.id,
           name: adsetDetails.name || fbAdset.name,

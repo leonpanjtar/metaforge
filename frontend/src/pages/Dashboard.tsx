@@ -314,7 +314,7 @@ const Dashboard = () => {
             </p>
           </Link>
 
-          {currentAccount && (
+          {currentAccount && (currentAccount.role === 'owner' || currentAccount.role === 'admin') && (
             <Link
               to={`/account/${currentAccount._id}`}
               className="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"

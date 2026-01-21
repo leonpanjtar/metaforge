@@ -1,16 +1,27 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { AdCopy } from '../models/AdCopy';
 import { Adset } from '../models/Adset';
+import { getAccountFilter, getAccountUserIds } from '../utils/accountFilter';
 
 export const getAdCopies = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { adsetId } = req.params;
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter - query by accountId first, then fallback to userId
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -35,9 +46,12 @@ export const createAdCopy = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+
     const adset = await Adset.findOne({
       _id: adsetId,
-      userId: req.userId,
+      userId: { $in: accountUserIds },
     });
 
     if (!adset) {
@@ -81,8 +95,11 @@ export const updateAdCopy = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+    
     const adset = copy.adsetId as any;
-    if (adset.userId.toString() !== req.userId) {
+    if (!accountUserIds.includes(adset.userId.toString())) {
       res.status(403).json({ error: 'Unauthorized' });
       return;
     }
@@ -108,8 +125,11 @@ export const deleteAdCopy = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+    
     const adset = copy.adsetId as any;
-    if (adset.userId.toString() !== req.userId) {
+    if (!accountUserIds.includes(adset.userId.toString())) {
       res.status(403).json({ error: 'Unauthorized' });
       return;
     }

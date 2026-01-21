@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { Adset } from '../models/Adset';
 import { Asset } from '../models/Asset';
@@ -9,6 +10,7 @@ import { FacebookAccount } from '../models/FacebookAccount';
 import { Campaign } from '../models/Campaign';
 import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
 import { ScoringService } from '../services/ai/ScoringService';
+import { getAccountFilter, getAccountUserIds } from '../utils/accountFilter';
 
 export const generateCombinations = async (
   req: AuthRequest,
@@ -44,10 +46,20 @@ export const generateCombinations = async (
     const finalSelectedDescriptions = selectedDescriptions.length > 0 ? selectedDescriptions : descriptionsPayload;
     const finalSelectedCTATypes = selectedCTATypes.length > 0 ? selectedCTATypes : ctaTypesPayload;
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    }).populate('contentData');
+    // Get account filter - query by accountId first, then fallback to userId
+    const { getAccountFilter } = await import('../utils/accountFilter');
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query).populate('contentData');
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -196,10 +208,13 @@ export const scoreCombinations = async (
     const { adsetId } = req.params;
     const { minScore = 70 } = req.body; // Default minimum score is 70
 
-    // Verify adset ownership
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+
+    // Verify adset is in account
     const adset = await Adset.findOne({
       _id: adsetId,
-      userId: req.userId,
+      userId: { $in: accountUserIds },
     }).populate('contentData');
 
     if (!adset) {
@@ -389,10 +404,19 @@ export const getCombinations = async (req: AuthRequest, res: Response): Promise<
     const { adsetId } = req.params;
     const { sortBy = 'overallScore', limit } = req.query;
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter - query by accountId first, then fallback to userId
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -406,7 +430,7 @@ export const getCombinations = async (req: AuthRequest, res: Response): Promise<
       sortOptions.predictedCTR = -1;
     }
 
-    let query = AdCombination.find({ adsetId })
+    let combinationQuery = AdCombination.find({ adsetId })
       .populate('assetIds')
       .populate('headlineId')
       .populate('hookId')
@@ -417,10 +441,10 @@ export const getCombinations = async (req: AuthRequest, res: Response): Promise<
 
     // Only apply limit if explicitly provided
     if (limit) {
-      query = query.limit(parseInt(limit as string));
+      combinationQuery = combinationQuery.limit(parseInt(limit as string));
     }
 
-    const combinations = await query;
+    const combinations = await combinationQuery;
 
     res.json(combinations);
   } catch (error: any) {
@@ -436,9 +460,12 @@ export const previewCombination = async (
   try {
     const { adsetId, combinationId } = req.params;
 
+    // Get all user IDs in the current account
+    const accountUserIds = await getAccountUserIds(req);
+
     const adset = await Adset.findOne({
       _id: adsetId,
-      userId: req.userId,
+      userId: { $in: accountUserIds },
     }).populate('campaignId');
 
     if (!adset) {
@@ -590,10 +617,19 @@ export const updateCombination = async (
     const { adsetId, combinationId } = req.params;
     const { ctaType } = req.body;
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter - query by accountId first, then fallback to userId
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -634,10 +670,19 @@ export const deleteCombination = async (
   try {
     const { adsetId, combinationId } = req.params;
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter - query by accountId first, then fallback to userId
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -682,10 +727,19 @@ export const deleteCombinationsBulk = async (
       return;
     }
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter - query by accountId first, then fallback to userId
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+    }
+
+    const adset = await Adset.findOne(query);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });

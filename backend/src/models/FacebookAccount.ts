@@ -2,7 +2,8 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IFacebookAccount extends Document {
   userId: mongoose.Types.ObjectId;
-  accountId: string;
+  accountId: string; // Facebook ad account ID
+  organizationAccountId?: mongoose.Types.ObjectId; // Organization account ID (for sharing)
   accessToken: string;
   refreshToken?: string;
   tokenExpiry?: Date;
@@ -22,6 +23,11 @@ const FacebookAccountSchema = new Schema<IFacebookAccount>(
     accountId: {
       type: String,
       required: true,
+    },
+    organizationAccountId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Account',
+      required: false, // Optional for backward compatibility
     },
     accessToken: {
       type: String,
