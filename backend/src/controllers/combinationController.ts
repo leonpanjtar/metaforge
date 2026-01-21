@@ -604,9 +604,14 @@ export const updateCombination = async (
       _id: combinationId,
       adsetId,
     });
-
     if (!combination) {
       res.status(404).json({ error: 'Combination not found' });
+      return;
+    }
+
+    // Do not allow editing of combinations that have already been deployed
+    if (combination.deployedToFacebook) {
+      res.status(400).json({ error: 'Cannot edit a combination that has been deployed to Facebook' });
       return;
     }
 
@@ -649,6 +654,12 @@ export const deleteCombination = async (
       return;
     }
 
+    // Prevent deletion of combinations that have already been deployed
+    if (combination.deployedToFacebook) {
+      res.status(400).json({ error: 'Cannot delete a combination that has been deployed to Facebook' });
+      return;
+    }
+
     await AdCombination.findByIdAndDelete(combinationId);
 
     res.json({ success: true });
@@ -681,9 +692,11 @@ export const deleteCombinationsBulk = async (
       return;
     }
 
+    // Only delete combinations that are not deployed
     const result = await AdCombination.deleteMany({
       _id: { $in: combinationIds },
       adsetId,
+      deployedToFacebook: { $ne: true },
     });
 
     res.json({ 

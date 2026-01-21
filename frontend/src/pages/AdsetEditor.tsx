@@ -1009,9 +1009,19 @@ const AdsetEditor = () => {
   };
 
   const handleDeploy = async (combinationIds: string[], status: 'PAUSED' | 'ACTIVE') => {
+    // Extra safety: never send already deployed combinations
+    const nonDeployedIds = combinations
+      ?.filter(c => combinationIds.includes(c._id) && !c.deployedToFacebook)
+      .map(c => c._id) || [];
+
+    if (nonDeployedIds.length === 0) {
+      alert('No undeployed combinations selected.');
+      return;
+    }
+
     await deployMutation.mutateAsync({
       adsetId,
-      combinationIds,
+      combinationIds: nonDeployedIds,
       status,
     });
   };
@@ -1034,8 +1044,17 @@ const AdsetEditor = () => {
       alert('Please select at least one combination to delete');
       return;
     }
-    if (confirm(`Are you sure you want to delete ${selectedIds.length} combination(s)?`)) {
-      await deleteCombinationsBulkMutation.mutateAsync(selectedIds);
+    const deletableIds = combinations
+      ?.filter(c => selectedIds.includes(c._id) && !c.deployedToFacebook)
+      .map(c => c._id) || [];
+
+    if (deletableIds.length === 0) {
+      alert('Selected combinations are already deployed and cannot be deleted.');
+      return;
+    }
+
+    if (confirm(`Are you sure you want to delete ${deletableIds.length} combination(s)?`)) {
+      await deleteCombinationsBulkMutation.mutateAsync(deletableIds);
     }
   };
 
@@ -2159,7 +2178,7 @@ const AdsetEditor = () => {
               {/* Combinations List */}
               {combinations && combinations.length > 0 && (
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center">
                     <h2 className="text-xl font-semibold">Ad Combinations ({combinations.length})</h2>
                     <div className="flex gap-2 items-center">
                       {/* <button
@@ -2180,8 +2199,10 @@ const AdsetEditor = () => {
                       )} */}
                       <button
                         onClick={() => {
-                          // Select all
-                          setSelectedCombinations(new Set(combinations.map(c => c._id)));
+                          // Select all (only non-deployed)
+                          setSelectedCombinations(
+                            new Set(combinations.filter(c => !c.deployedToFacebook).map(c => c._id))
+                          );
                         }}
                         className="p-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 flex items-center justify-center"
                         aria-label="Select all combinations"
@@ -2255,20 +2276,27 @@ const AdsetEditor = () => {
 
                       const asset = combination.assetIds?.[0];
                       const isSelected = selectedCombinations.has(combination._id);
+                      const isDeployed = combination.deployedToFacebook;
 
                       return (
                         <div
                           key={combination._id}
-                          className={`border-2 rounded-lg p-4 bg-white hover:shadow-md transition-shadow ${
-                            isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                          className={`border-2 rounded-lg p-4 transition-shadow ${
+                            isDeployed
+                              ? 'border-green-500 bg-green-50 opacity-80'
+                              : isSelected
+                              ? 'border-blue-500 bg-blue-50 hover:shadow-md'
+                              : 'border-gray-200 bg-white hover:shadow-md'
                           }`}
                         >
                           <div className="flex items-start justify-between mb-3">
-                            <label className="flex items-center cursor-pointer">
+                            <label className={`flex items-center ${isDeployed ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                               <input
                                 type="checkbox"
-                                checked={isSelected}
+                                checked={isSelected && !isDeployed}
+                                disabled={isDeployed}
                                 onChange={(e) => {
+                                  if (isDeployed) return;
                                   if (e.target.checked) {
                                     setSelectedCombinations(prev => new Set([...prev, combination._id]));
                                   } else {
@@ -2331,7 +2359,7 @@ const AdsetEditor = () => {
                                     ctaType: e.target.value,
                                   });
                                 }}
-                                disabled={updateCombinationCTAMutation.isPending}
+                                disabled={updateCombinationCTAMutation.isPending || isDeployed}
                                 className="mt-1 block w-full text-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                               >
                                 {FACEBOOK_CTA_TYPES.map((type) => (
@@ -2359,7 +2387,7 @@ const AdsetEditor = () => {
                             </button>
                             <button
                               onClick={() => handleDeleteCombination(combination._id)}
-                              disabled={deleteCombinationMutation.isPending}
+                              disabled={deleteCombinationMutation.isPending || isDeployed}
                               className="px-3 py-2 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
                               title="Delete combination"
                             >
@@ -2369,9 +2397,9 @@ const AdsetEditor = () => {
                             </button>
                           </div>
 
-                          {combination.deployedToFacebook && (
-                            <div className="mt-2 text-xs text-green-600">
-                              ✓ Deployed (ID: {combination.facebookAdId})
+                          {isDeployed && (
+                            <div className="mt-2 text-xs text-green-700 font-semibold">
+                              ✓ Deployed to Facebook (ID: {combination.facebookAdId})
                             </div>
                           )}
                         </div>
