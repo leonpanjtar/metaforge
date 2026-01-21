@@ -139,7 +139,7 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
           : `act_${facebookAccount.accountId}`;
         const adId = combo.facebookAdId;
         const endpoint = `/${adId}/insights`;
-        const fields = 'impressions,clicks,ctr,spend,actions,outcome_results';
+        const fields = 'impressions,clicks,ctr,spend,actions,results,objective_results';
         const timeRange = JSON.stringify(dateRange);
         
         console.log(`[getWinningAds][GraphExplorer] Query for ad ${adId}:`, {
@@ -159,12 +159,6 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
         const clicks = Number(insights.clicks || 0);
         const spend = Number(insights.spend || 0);
         const leads = extractLeadOutcomes(insights);
-
-        if (leads <= 0) {
-          // Skip ads without any lead outcomes
-          continue;
-        }
-
         const costPerLead = leads > 0 ? spend / leads : 0;
 
         const adset = adsetMap.get(combo.adsetId.toString());
