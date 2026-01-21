@@ -19,6 +19,12 @@ export interface FacebookAdset {
   status: string;
 }
 
+export interface FacebookAd {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export class FacebookApiService {
   private api: AxiosInstance;
   private accessToken: string;
@@ -119,6 +125,62 @@ export class FacebookApiService {
       throw new Error(
         `Failed to fetch adsets: ${error.response?.data?.error?.message || error.message}`
       );
+    }
+  }
+
+  async getAdsForAdset(adsetId: string): Promise<FacebookAd[]> {
+    try {
+      const response = await this.api.get(`/${adsetId}/ads`, {
+        params: {
+          fields: 'id,name,status',
+        },
+      });
+      return response.data.data || [];
+    } catch (error: any) {
+      throw new Error(
+        `Failed to fetch ads for adset: ${error.response?.data?.error?.message || error.message}`
+      );
+    }
+  }
+
+  /**
+   * Get insights at AD level for all ads in a given campaign (used for Winning Ads view).
+   */
+  async getCampaignAdInsights(
+    campaignId: string,
+    dateRange: { since: string; until: string }
+  ): Promise<any[]> {
+    try {
+      const response = await this.api.get(`/${campaignId}/insights`, {
+        params: {
+          level: 'ad',
+          fields: [
+            'ad_id',
+            'ad_name',
+            'adset_id',
+            'adset_name',
+            'campaign_name',
+            'impressions',
+            'clicks',
+            'ctr',
+            'spend',
+            'actions',
+            'results',
+            'objective_results',
+            'cost_per_result',
+            'result_values_performance_indicator',
+            'result_rate',
+          ].join(','),
+          time_range: JSON.stringify(dateRange),
+        },
+      });
+      return response.data.data || [];
+    } catch (error: any) {
+      const fbError = error.response?.data?.error;
+      const message =
+        fbError?.message || error.message || 'Failed to fetch campaign ad insights';
+      // Surface clear info for rate-limit situations
+      throw new Error(`Failed to fetch campaign ad insights: ${message}`);
     }
   }
 
@@ -581,6 +643,48 @@ export class FacebookApiService {
       throw new Error(
         `Failed to exchange token: ${error.response?.data?.error?.message || error.message}`
       );
+    }
+  }
+
+  /**
+   * Get Ads Pixel ID for an ad account
+   */
+  async getAdsPixelId(accountId: string): Promise<string | null> {
+    try {
+      const response = await this.api.get(`/${accountId}/adspixels`, {
+        params: {
+          fields: 'id,name',
+        },
+      });
+      const pixels = response.data.data || [];
+      return pixels.length > 0 ? pixels[0].id : null;
+    } catch (error: any) {
+      console.warn('[FacebookApiService.getAdsPixelId] Failed to fetch pixel ID:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get Ads Pixel Stats with event counts
+   * @param pixelId - The Ads Pixel ID
+   * @param dateRange - Date range for stats
+   */
+  async getAdsPixelStats(
+    pixelId: string,
+    dateRange: { since: string; until: string }
+  ): Promise<any> {
+    try {
+      const response = await this.api.get(`/${pixelId}/stats`, {
+        params: {
+          aggregation: 'event_total_counts',
+          start_time: Math.floor(new Date(dateRange.since).getTime() / 1000),
+          end_time: Math.floor(new Date(dateRange.until).getTime() / 1000),
+        },
+      });
+      return response.data.data || [];
+    } catch (error: any) {
+      console.warn('[FacebookApiService.getAdsPixelStats] Failed to fetch pixel stats:', error.message);
+      return [];
     }
   }
 }

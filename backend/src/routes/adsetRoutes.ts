@@ -6,6 +6,7 @@ import {
   updateAdset,
   deleteAdset,
   duplicateAdset,
+  copyAdsetSettings,
   syncAdsetFromFacebook,
 } from '../controllers/adsetController';
 import { authenticate } from '../middleware/auth';
@@ -14,6 +15,7 @@ const router = Router();
 
 router.post('/', authenticate, createAdset);
 router.post('/:id/duplicate', authenticate, duplicateAdset);
+router.post('/:id/copy-settings', authenticate, copyAdsetSettings);
 router.post('/:id/sync', authenticate, syncAdsetFromFacebook);
 router.get('/', authenticate, getAdsets);
 router.get('/:id', authenticate, getAdset);

@@ -1,12 +1,13 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { Adset } from '../models/Adset';
-import { AdCombination } from '../models/AdCombination';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
+import { Campaign } from '../models/Campaign';
+import { Adset } from '../models/Adset';
+import { AdCombination } from '../models/AdCombination';
 import { Asset } from '../models/Asset';
 import { AdCopy } from '../models/AdCopy';
-import { Campaign } from '../models/Campaign';
+import { WinningAdsCache } from '../models/WinningAdsCache';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs/promises';
@@ -57,9 +58,192 @@ function extractLeadOutcomes(insights: any): number {
   return 0;
 }
 
+// Helper to extract schedules from conversions:schedule_website
+// Uses the detailed results array with indicators
+function extractSchedules(insights: any): { count: number; costPerResult: number; conversionRate: number } {
+  let total = 0;
+  let costPerResult = 0;
+  let conversionRate = 0;
+  
+  // Parse results array to find conversions:schedule_website
+  const results = insights?.results;
+  if (Array.isArray(results)) {
+    for (const result of results) {
+      const indicator = (result.indicator || '').toString();
+      const values = result.values || [];
+      
+      // Look specifically for conversions:schedule_website
+      if (indicator === 'conversions:schedule_website' || indicator.includes('conversions:schedule_website')) {
+        // Sum all values for this indicator
+        for (const val of values) {
+          const value = Number(val.value || 0);
+          if (!Number.isNaN(value) && value > 0) {
+            total += value;
+          }
+        }
+      }
+    }
+  }
+  
+  // Parse cost_per_result array to get cost per conversion for schedule_website
+  const costPerResultArray = insights?.cost_per_result;
+  if (Array.isArray(costPerResultArray)) {
+    for (const costResult of costPerResultArray) {
+      const indicator = (costResult.indicator || '').toString();
+      const values = costResult.values || [];
+      
+      if (indicator === 'conversions:schedule_website' || indicator.includes('conversions:schedule_website')) {
+        // Get the first value (usually there's only one)
+        if (values.length > 0) {
+          const costValue = Number(values[0].value || 0);
+          if (!Number.isNaN(costValue) && costValue > 0) {
+            costPerResult = costValue;
+          }
+        }
+      }
+    }
+  }
+  
+  // Parse result_rate array to get conversion rate for schedule_website
+  const resultRateArray = insights?.result_rate;
+  if (Array.isArray(resultRateArray)) {
+    for (const rateResult of resultRateArray) {
+      const indicator = (rateResult.indicator || '').toString();
+      const values = rateResult.values || [];
+      
+      if (indicator === 'conversions:schedule_website' || indicator.includes('conversions:schedule_website')) {
+        // Get the first value (conversion rate as decimal, e.g., 0.08340284)
+        if (values.length > 0) {
+          const rateValue = Number(values[0].value || 0);
+          if (!Number.isNaN(rateValue) && rateValue > 0) {
+            conversionRate = rateValue;
+          }
+        }
+      }
+    }
+  }
+  
+  return { count: total, costPerResult, conversionRate };
+}
+
+// Helper to extract all conversion events from Facebook insights
+function extractConversionEvents(insights: any): Array<{ actionType: string; value: number }> {
+  const events: Array<{ actionType: string; value: number }> = [];
+  
+  // List of non-conversion actions to exclude
+  const excludedActions = [
+    'link_click',
+    'post_engagement',
+    'page_engagement',
+    'post_reaction',
+    'post_comment',
+    'post_share',
+    'video_view',
+    'photo_view',
+    'landing_page_view',
+    'onsite_conversion',
+    'offsite_conversion.fb_pixel', // Generic pixel tracking, not specific conversions
+  ];
+  
+  // List of known conversion event patterns (standard and custom)
+  const conversionPatterns = [
+    'lead',
+    'purchase',
+    'schedule', // Standard Schedule event
+    'appointment', // Appointments scheduled
+    'appointments_scheduled',
+    'appointment_scheduled',
+    'schedule_appointment',
+    'book_appointment',
+    'add_to_cart',
+    'initiate_checkout',
+    'complete_registration',
+    'find_location',
+    'contact',
+    'customize_product',
+    'donate',
+    'offsite_conversion.custom', // Custom conversions
+    'offsite_conversion.fb_pixel_custom', // Custom pixel events
+  ];
+  
+  const actions = insights?.actions;
+  if (Array.isArray(actions)) {
+    for (const action of actions) {
+      const actionType = (action.action_type || '').toString().toLowerCase();
+      const value = Number(action.value || 0);
+      
+      if (Number.isNaN(value) || value <= 0 || !actionType) {
+        continue;
+      }
+      
+      // Check if it's an excluded action
+      const isExcluded = excludedActions.some((excluded) => actionType.includes(excluded));
+      if (isExcluded) {
+        continue;
+      }
+      
+      // Check if it matches a conversion pattern OR starts with offsite_conversion
+      const isConversion = 
+        conversionPatterns.some((pattern) => actionType.includes(pattern)) ||
+        actionType.startsWith('offsite_conversion') ||
+        actionType.startsWith('onsite_conversion');
+      
+      if (isConversion) {
+        // Use original action_type (not lowercased) for display
+        const originalActionType = (action.action_type || '').toString();
+        events.push({
+          actionType: originalActionType,
+          value,
+        });
+      }
+    }
+  }
+  
+  // Also check objective_results for conversion events
+  const objectiveResults = insights?.objective_results;
+  if (Array.isArray(objectiveResults)) {
+    for (const obj of objectiveResults) {
+      const name = (obj.name || obj.objective || '').toString();
+      const value = Number(obj.value || 0);
+      if (!Number.isNaN(value) && value > 0 && name) {
+        // Check if we already have this event from actions
+        const exists = events.some((e) => 
+          e.actionType.toLowerCase() === name.toLowerCase() ||
+          e.actionType.toLowerCase().includes(name.toLowerCase()) ||
+          name.toLowerCase().includes(e.actionType.toLowerCase())
+        );
+        if (!exists) {
+          events.push({
+            actionType: name,
+            value,
+          });
+        }
+      }
+    }
+  }
+  
+  return events;
+}
+
 export const getWinningAds = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { since, until } = req.query as { since?: string; until?: string };
+    const {
+      since,
+      until,
+      sortBy,
+      sortDir,
+      minSchedules,
+      maxSchedules,
+      minSpend,
+      maxSpend,
+      minCps,
+      maxCps,
+      minClicks,
+      maxClicks,
+      minImpressions,
+      maxImpressions,
+      forceRefresh,
+    } = req.query as any;
 
     const endDate = until ? new Date(until) : new Date();
     const startDate = since ? new Date(since) : new Date(endDate);
@@ -68,132 +252,289 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       startDate.setMonth(endDate.getMonth() - 3);
     }
 
+    const sinceStr = startDate.toISOString().split('T')[0];
+    const untilStr = endDate.toISOString().split('T')[0];
     const dateRange = {
-      since: startDate.toISOString().split('T')[0],
-      until: endDate.toISOString().split('T')[0],
+      since: sinceStr,
+      until: untilStr,
     };
 
-    // Get all campaigns for this user that have OUTCOME_LEADS as objective
-    const leadCampaigns = await Campaign.find({
-      userId: req.userId,
-      objective: /OUTCOME_LEADS/i,
-    });
-
-    const leadCampaignIds = leadCampaigns.map((c) => c._id);
-    if (leadCampaignIds.length === 0) {
-      res.json({ ads: [] });
-      return;
-    }
-
-    // Get all adsets for this user within those lead campaigns
-    const adsets = await Adset.find({
-      userId: req.userId,
-      campaignId: { $in: leadCampaignIds },
-    }).populate('campaignId');
-    const adsetIds = adsets.map((a) => a._id);
-
-    if (adsetIds.length === 0) {
-      res.json({ ads: [] });
-      return;
-    }
-
-    // Map adsetId -> adset & campaign info for quick lookup
-    const adsetMap = new Map<string, any>();
-    for (const adset of adsets) {
-      adsetMap.set(adset._id.toString(), adset);
-    }
-
-    // Get all deployed combinations that have a Facebook ad ID
-    const combinations = await AdCombination.find({
-      adsetId: { $in: adsetIds },
-      deployedToFacebook: true,
-      facebookAdId: { $exists: true, $ne: null },
-    });
-
-    if (combinations.length === 0) {
-      res.json({ ads: [] });
-      return;
-    }
-
-    // Assume all adsets for this user belong to the same Facebook account (first one)
-    // We just need a token; account-specific info comes from each combination's campaign/adset
-    const firstAdset: any = adsets[0];
-    const campaign: any = firstAdset.campaignId;
-    const facebookAccount = await FacebookAccount.findById(campaign.facebookAccountId);
+    // Find an active Facebook account for this user
+    const facebookAccount =
+      (await FacebookAccount.findOne({ userId: req.userId, isActive: true })) ||
+      (await FacebookAccount.findOne({ userId: req.userId }));
     if (!facebookAccount) {
-      res.status(400).json({ error: 'Facebook account not found for user campaigns' });
+      res.status(400).json({ error: 'Facebook account not found for user' });
       return;
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    // Try cache first (valid for 1 hour), unless forceRefresh is true
+    const shouldForceRefresh = forceRefresh === 'true' || forceRefresh === true;
+    let cache = null;
+    
+    if (!shouldForceRefresh) {
+      cache = await WinningAdsCache.findOne({
+        userId: req.userId,
+        facebookAccountId: facebookAccount._id,
+        since: sinceStr,
+        until: untilStr,
+      });
+    }
 
-    const results: any[] = [];
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const now = Date.now();
 
-    for (const combo of combinations) {
-      if (!combo.facebookAdId) continue;
+    let results: any[] = [];
 
-      try {
-        // Log the exact query for Graph Explorer testing
-        const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
-          ? facebookAccount.accountId
-          : `act_${facebookAccount.accountId}`;
-        const adId = combo.facebookAdId;
-        const endpoint = `/${adId}/insights`;
-        const fields = 'impressions,clicks,ctr,spend,actions,results,objective_results';
-        const timeRange = JSON.stringify(dateRange);
-        
-        console.log(`[getWinningAds][GraphExplorer] Query for ad ${adId}:`, {
-          endpoint: `https://graph.facebook.com/v24.0${endpoint}`,
-          method: 'GET',
-          params: {
-            fields,
-            time_range: timeRange,
-            access_token: '<ACCESS_TOKEN>',
+    if (!shouldForceRefresh && cache && now - cache.updatedAt.getTime() < ONE_HOUR_MS) {
+      results = cache.ads;
+      console.log('[getWinningAds] Returning cached winning ads');
+    } else {
+      if (shouldForceRefresh) {
+        console.log('[getWinningAds] Force refresh requested; fetching from Facebook');
+      } else {
+        console.log('[getWinningAds] Cache miss or stale; fetching from Facebook');
+      }
+
+      const apiService = new FacebookApiService(facebookAccount.accessToken);
+      const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
+        ? facebookAccount.accountId
+        : `act_${facebookAccount.accountId}`;
+
+      results = [];
+
+      // STEP 1: Get all campaigns on this ad account and filter to OUTCOME_LEADS
+      const campaigns = await apiService.getCampaigns(accountIdWithPrefix);
+      const leadCampaigns = campaigns.filter(
+        (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
+      );
+
+      // STEP 2–4: For each lead campaign, get INSIGHTS at AD level (far fewer calls, avoids rate limits)
+      for (const campaign of leadCampaigns) {
+        try {
+          const timeRange = JSON.stringify(dateRange);
+          console.log(
+            `[getWinningAds][GraphExplorer] Campaign-level insights for campaign ${campaign.id}:`,
+            {
+              endpoint: `https://graph.facebook.com/v24.0/${campaign.id}/insights`,
+              method: 'GET',
+              params: {
+                level: 'ad',
+                fields:
+                  'ad_id,ad_name,adset_id,adset_name,campaign_name,impressions,clicks,ctr,spend,actions,results,objective_results,cost_per_result,result_values_performance_indicator,result_rate',
+                time_range: timeRange,
+                access_token: '<ACCESS_TOKEN>',
+              },
+            }
+          );
+
+          const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange);
+
+          for (const row of rows) {
+            const adId = row.ad_id;
+            const impressions = Number(row.impressions || 0);
+            const clicks = Number(row.clicks || 0);
+            const spend = Number(row.spend || 0);
+            const schedulesData = extractSchedules(row);
+            const schedules = schedulesData.count;
+            // Use cost_per_result from API if available, otherwise calculate from spend
+            const costPerSchedule = schedulesData.costPerResult > 0 
+              ? schedulesData.costPerResult 
+              : (schedules > 0 ? spend / schedules : 0);
+            const conversionRate = schedulesData.conversionRate;
+            const conversionEvents = extractConversionEvents(row);
+            
+            // Debug logging for conversion events
+            if (conversionEvents.length > 0) {
+              console.log(`[getWinningAds] Ad ${adId} conversion events:`, conversionEvents.map(e => `${e.actionType}: ${e.value}`).join(', '));
+            }
+            // Log performance indicator and results for debugging schedules
+            if (row.result_values_performance_indicator) {
+              console.log(`[getWinningAds] Ad ${adId} performance indicator:`, row.result_values_performance_indicator);
+            }
+            if (row.results && Array.isArray(row.results)) {
+              console.log(`[getWinningAds] Ad ${adId} results array:`, JSON.stringify(row.results, null, 2));
+            }
+            if (schedules > 0) {
+              console.log(`[getWinningAds] Ad ${adId} schedules: ${schedules}, cost per schedule: ${costPerSchedule.toFixed(2)}, conversion rate: ${(conversionRate * 100).toFixed(2)}%`);
+            }
+            // Log all actions for debugging
+            if (row.actions && Array.isArray(row.actions)) {
+              const allActionTypes = row.actions.map((a: any) => a.action_type).filter(Boolean);
+              if (allActionTypes.length > 0) {
+                console.log(`[getWinningAds] Ad ${adId} all action types:`, allActionTypes.join(', '));
+              }
+            }
+
+            const accountIdNumeric = facebookAccount.accountId.startsWith('act_')
+              ? facebookAccount.accountId.replace('act_', '')
+              : facebookAccount.accountId;
+            const facebookAdLink = `https://www.facebook.com/adsmanager/manage/ads?act=${accountIdNumeric}&selected_ad_ids[0]=${adId}`;
+
+            results.push({
+              combinationId: adId,
+              facebookAdId: adId,
+              adsetId: row.adset_id,
+              campaignName: row.campaign_name || campaign.name,
+              adsetName: row.adset_name || '',
+              adName: row.ad_name || '',
+              impressions,
+              clicks,
+              spend,
+              schedules,
+              costPerSchedule,
+              conversionRate,
+              score: 0, // Will be calculated after all ads are collected
+              url: '',
+              facebookAdLink,
+              conversionEvents,
+            });
+          }
+        } catch (error: any) {
+          console.error(
+            `[getWinningAds] Failed to fetch insights for campaign ${campaign.id}:`,
+            error
+          );
+        }
+      }
+
+      // Upsert cache
+      await WinningAdsCache.findOneAndUpdate(
+        {
+          userId: req.userId,
+          facebookAccountId: facebookAccount._id,
+          since: sinceStr,
+          until: untilStr,
+        },
+        {
+          $set: {
+            ads: results,
           },
-          exampleCurl: `curl -X GET "https://graph.facebook.com/v24.0${endpoint}?fields=${fields}&time_range=${encodeURIComponent(timeRange)}&access_token=<ACCESS_TOKEN>"`,
-        });
-        
-        const insights = await apiService.getAdInsights(adId, dateRange);
+        },
+        { upsert: true, new: true }
+      );
+    }
 
-        const impressions = Number(insights.impressions || 0);
-        const clicks = Number(insights.clicks || 0);
-        const spend = Number(insights.spend || 0);
-        const leads = extractLeadOutcomes(insights);
-        const costPerLead = leads > 0 ? spend / leads : 0;
+    // Calculate relative scores for all ads (both fresh and cached)
+    // Score based on: schedules (higher is better), costPerSchedule (lower is better), conversionRate (higher is better), spend (higher = more data)
+    if (results.length > 0) {
+      // Find min/max for normalization
+      const schedulesValues = results.map((ad) => ad.schedules || 0).filter((v) => v > 0);
+      const costPerScheduleValues = results.map((ad) => ad.costPerSchedule || 0).filter((v) => v > 0);
+      const conversionRateValues = results.map((ad) => ad.conversionRate || 0).filter((v) => v > 0);
+      const spendValues = results.map((ad) => ad.spend || 0).filter((v) => v > 0);
 
-        const adset = adsetMap.get(combo.adsetId.toString());
-        const campaignForAdset = adset?.campaignId;
+      const maxSchedules = schedulesValues.length > 0 ? Math.max(...schedulesValues) : 1;
+      const minCostPerSchedule = costPerScheduleValues.length > 0 ? Math.min(...costPerScheduleValues) : 1;
+      const maxCostPerSchedule = costPerScheduleValues.length > 0 ? Math.max(...costPerScheduleValues) : 1;
+      const maxConversionRate = conversionRateValues.length > 0 ? Math.max(...conversionRateValues) : 1;
+      const maxSpend = spendValues.length > 0 ? Math.max(...spendValues) : 1;
 
-        // Build a link to the ad in Facebook Ads Manager for preview
-        const accountId = facebookAccount.accountId.startsWith('act_')
-          ? facebookAccount.accountId.replace('act_', '')
-          : facebookAccount.accountId;
-        const facebookAdLink = `https://www.facebook.com/adsmanager/manage/ads?act=${accountId}&selected_ad_ids[0]=${combo.facebookAdId}`;
+      // Calculate score for each ad (0-100 scale)
+      for (const ad of results) {
+        const schedules = ad.schedules || 0;
+        const costPerSchedule = ad.costPerSchedule || 0;
+        const conversionRate = ad.conversionRate || 0;
+        const spend = ad.spend || 0;
 
-        results.push({
-          combinationId: combo._id,
-          facebookAdId: combo.facebookAdId,
-          adsetId: combo.adsetId,
-          campaignName: campaignForAdset?.name || '',
-          adsetName: adset?.name || '',
-          impressions,
-          clicks,
-          spend,
-          leads,
-          costPerLead,
-          url: combo.url || adset?.contentData?.landingPageUrl || '',
-          facebookAdLink,
-          dateRange,
-        });
-      } catch (error: any) {
-        console.error(`Failed to fetch insights for ad ${combo.facebookAdId}:`, error);
+        // Normalize each metric (0-1 scale)
+        const schedulesScore = maxSchedules > 0 ? schedules / maxSchedules : 0;
+        // For cost per schedule, invert (lower is better) - normalize to 0-1 where 1 = best (lowest cost)
+        const costPerScheduleScore =
+          maxCostPerSchedule > minCostPerSchedule && costPerSchedule > 0
+            ? 1 - (costPerSchedule - minCostPerSchedule) / (maxCostPerSchedule - minCostPerSchedule)
+            : costPerSchedule > 0
+            ? 0
+            : 0;
+        const conversionRateScore = maxConversionRate > 0 ? conversionRate / maxConversionRate : 0;
+        // Spend score (higher spend = more data, but normalize to not dominate)
+        const spendScore = maxSpend > 0 ? Math.min(spend / maxSpend, 1) : 0;
+
+        // Weighted combination (you can adjust weights)
+        // Higher weight on schedules and conversion rate, moderate on cost efficiency, lower on spend
+        const overallScore =
+          schedulesScore * 0.4 + // 40% weight on schedules
+          costPerScheduleScore * 0.3 + // 30% weight on cost efficiency
+          conversionRateScore * 0.25 + // 25% weight on conversion rate
+          spendScore * 0.05; // 5% weight on spend (data volume)
+
+        ad.score = overallScore * 100; // Scale to 0-100
       }
     }
 
-    // Sort by cost per lead ascending (best first)
-    results.sort((a, b) => a.costPerLead - b.costPerLead);
+    // Apply filters
+    const parsed = {
+      minSchedules: minSchedules !== undefined ? Number(minSchedules) : undefined,
+      maxSchedules: maxSchedules !== undefined ? Number(maxSchedules) : undefined,
+      minSpend: minSpend !== undefined ? Number(minSpend) : undefined,
+      maxSpend: maxSpend !== undefined ? Number(maxSpend) : undefined,
+      minCps: minCps !== undefined ? Number(minCps) : undefined,
+      maxCps: maxCps !== undefined ? Number(maxCps) : undefined,
+      minClicks: minClicks !== undefined ? Number(minClicks) : undefined,
+      maxClicks: maxClicks !== undefined ? Number(maxClicks) : undefined,
+      minImpressions: minImpressions !== undefined ? Number(minImpressions) : undefined,
+      maxImpressions: maxImpressions !== undefined ? Number(maxImpressions) : undefined,
+    };
 
-    res.json({ ads: results });
+    let filtered = results.filter((ad) => {
+      if (parsed.minSchedules !== undefined && (ad.schedules || 0) < parsed.minSchedules) return false;
+      if (parsed.maxSchedules !== undefined && (ad.schedules || 0) > parsed.maxSchedules) return false;
+      if (parsed.minSpend !== undefined && ad.spend < parsed.minSpend) return false;
+      if (parsed.maxSpend !== undefined && ad.spend > parsed.maxSpend) return false;
+      if (parsed.minCps !== undefined && (ad.costPerSchedule || 0) < parsed.minCps) return false;
+      if (parsed.maxCps !== undefined && (ad.costPerSchedule || 0) > parsed.maxCps) return false;
+      if (parsed.minClicks !== undefined && ad.clicks < parsed.minClicks) return false;
+      if (parsed.maxClicks !== undefined && ad.clicks > parsed.maxClicks) return false;
+      if (parsed.minImpressions !== undefined && ad.impressions < parsed.minImpressions)
+        return false;
+      if (parsed.maxImpressions !== undefined && ad.impressions > parsed.maxImpressions)
+        return false;
+      return true;
+    });
+
+    // Sorting - default: score descending, then schedules descending
+    const sortField = (sortBy as string) || 'score';
+    const sortDirection = (sortDir as string) === 'asc' ? 'asc' : 'desc';
+
+    filtered.sort((a, b) => {
+      const getVal = (obj: any) => {
+        switch (sortField) {
+          case 'spend':
+            return obj.spend;
+          case 'costPerSchedule':
+            return obj.costPerSchedule || 0;
+          case 'clicks':
+            return obj.clicks;
+          case 'impressions':
+            return obj.impressions;
+          case 'conversionRate':
+            return obj.conversionRate || 0;
+          case 'schedules':
+            return obj.schedules || 0;
+          case 'score':
+          default:
+            return obj.score || 0;
+        }
+      };
+
+      const av = getVal(a);
+      const bv = getVal(b);
+
+      if (av === bv) {
+        // Secondary sort: schedules descending when score equal
+        if (sortField === 'score') {
+          return (b.schedules || 0) - (a.schedules || 0);
+        }
+        return 0;
+      }
+
+      if (sortDirection === 'asc') {
+        return av - bv;
+      }
+      return bv - av;
+    });
+
+    res.json({ ads: filtered });
   } catch (error: any) {
     console.error('getWinningAds error:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch winning ads' });
@@ -279,6 +620,193 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
   } catch (error: any) {
     console.error('getAdDetails error:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch ad details' });
+  }
+};
+
+export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { facebookAdId, campaignId, adsetName } = req.body;
+
+    if (!facebookAdId || !campaignId || !adsetName) {
+      res.status(400).json({ error: 'facebookAdId, campaignId, and adsetName are required' });
+      return;
+    }
+
+    // Verify campaign belongs to user
+    const campaign = await Campaign.findOne({
+      _id: campaignId,
+      userId: req.userId,
+    });
+    if (!campaign) {
+      res.status(404).json({ error: 'Campaign not found or access denied' });
+      return;
+    }
+
+    // Get Facebook account
+    const facebookAccount = await FacebookAccount.findById(campaign.facebookAccountId);
+    if (!facebookAccount) {
+      res.status(404).json({ error: 'Facebook account not found' });
+      return;
+    }
+
+    const apiService = new FacebookApiService(facebookAccount.accessToken);
+
+    // Get ad details and creative
+    const adDetails = await apiService.getAdDetails(facebookAdId);
+    const creativeId = adDetails.creative?.id;
+    if (!creativeId) {
+      res.status(400).json({ error: 'Creative ID not found' });
+      return;
+    }
+
+    const creativeDetails = await apiService.getAdCreativeDetails(creativeId);
+    const linkData = creativeDetails.object_story_spec?.link_data || {};
+    const adsetDetails = await apiService.getAdsetDetails(adDetails.adset_id);
+
+    // Create new adset
+    const newAdset = new Adset({
+      userId: req.userId,
+      campaignId: campaign._id,
+      name: adsetName,
+      targeting: {
+        ageMin: adsetDetails.targeting?.age_min,
+        ageMax: adsetDetails.targeting?.age_max,
+        genders: adsetDetails.targeting?.genders,
+        geoLocations: adsetDetails.targeting?.geo_locations || {},
+        interests: adsetDetails.targeting?.interests || [],
+        behaviors: adsetDetails.targeting?.behaviors || [],
+        publisherPlatforms: adsetDetails.targeting?.publisher_platforms || ['facebook', 'instagram'],
+        placements: adsetDetails.targeting?.publisher_platforms || [],
+      },
+      budget: 0,
+      status: 'PAUSED',
+      optimizationGoal: adsetDetails.optimization_goal,
+      billingEvent: adsetDetails.billing_event,
+      bidStrategy: adsetDetails.bid_strategy,
+      bidAmount: adsetDetails.bid_amount,
+      promotedObject: adsetDetails.promoted_object,
+      contentData: {
+        landingPageUrl: linkData.link || '',
+      },
+    });
+    await newAdset.save();
+
+    const newAdsetId = newAdset._id.toString();
+
+    // Download image if we have an image hash
+    let importedAssetId: string | null = null;
+    if (linkData.image_hash) {
+      try {
+        const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
+          ? facebookAccount.accountId
+          : `act_${facebookAccount.accountId}`;
+        
+        const adimagesResponse = await axios.get(
+          `https://graph.facebook.com/v24.0/${accountIdWithPrefix}/adimages`,
+          {
+            params: {
+              hashes: `['${linkData.image_hash}']`,
+              access_token: facebookAccount.accessToken,
+            },
+          }
+        );
+        
+        const imageData = adimagesResponse.data?.images?.[linkData.image_hash];
+        if (imageData?.url) {
+          const imageResponse = await axios.get(imageData.url, {
+            responseType: 'arraybuffer',
+          });
+          const imageBuffer = Buffer.from(imageResponse.data);
+
+          const filename = `imported-${facebookAdId}-${Date.now()}.jpg`;
+          const uploadsDir = path.join(process.cwd(), 'uploads', newAdsetId);
+          await fs.mkdir(uploadsDir, { recursive: true });
+          const filepath = path.join(uploadsDir, filename);
+          await fs.writeFile(filepath, imageBuffer);
+
+          const asset = new Asset({
+            adsetId: newAdsetId,
+            type: 'image',
+            filename,
+            filepath,
+            url: `/uploads/${newAdsetId}/${filename}`,
+            metadata: {
+              facebookImageHash: linkData.image_hash,
+            },
+          });
+          await asset.save();
+          importedAssetId = asset._id.toString();
+        }
+      } catch (error: any) {
+        console.error('Failed to download and save image:', error);
+      }
+    }
+
+    // Create AdCopy entries
+    const copyEntries: any[] = [];
+    
+    if (linkData.name) {
+      const headline = new AdCopy({
+        adsetId: newAdsetId,
+        type: 'headline',
+        content: linkData.name,
+        variantIndex: 0,
+        generatedByAI: false,
+      });
+      await headline.save();
+      copyEntries.push({ type: 'headline', id: headline._id });
+    }
+
+    if (linkData.message) {
+      const body = new AdCopy({
+        adsetId: newAdsetId,
+        type: 'body',
+        content: linkData.message,
+        variantIndex: 0,
+        generatedByAI: false,
+      });
+      await body.save();
+      copyEntries.push({ type: 'body', id: body._id });
+    }
+
+    if (linkData.description) {
+      const description = new AdCopy({
+        adsetId: newAdsetId,
+        type: 'description',
+        content: linkData.description,
+        variantIndex: 0,
+        generatedByAI: false,
+      });
+      await description.save();
+      copyEntries.push({ type: 'description', id: description._id });
+    }
+
+    const ctaType = linkData.call_to_action?.type || 'LEARN_MORE';
+    const ctaContent = linkData.call_to_action?.value?.link_caption || ctaType.replace(/_/g, ' ');
+    const cta = new AdCopy({
+      adsetId: newAdsetId,
+      type: 'cta',
+      content: ctaContent,
+      variantIndex: 0,
+      generatedByAI: false,
+    });
+    await cta.save();
+    copyEntries.push({ type: 'cta', id: cta._id });
+
+    res.json({
+      success: true,
+      adset: newAdset,
+      imported: {
+        assetId: importedAssetId,
+        copyEntries,
+        landingPageUrl: linkData.link,
+        ctaType,
+      },
+      message: 'Adset created successfully with imported ad assets.',
+    });
+  } catch (error: any) {
+    console.error('createAdsetFromWinningAd error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create adset from winning ad' });
   }
 };
 

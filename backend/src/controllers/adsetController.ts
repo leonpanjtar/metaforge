@@ -254,6 +254,124 @@ export const updateAdset = async (req: AuthRequest, res: Response): Promise<void
   }
 };
 
+export const copyAdsetSettings = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params; // Target adset ID
+    const { sourceAdsetId } = req.body;
+
+    if (!sourceAdsetId) {
+      res.status(400).json({ error: 'sourceAdsetId is required' });
+      return;
+    }
+
+    // Find target adset
+    const targetAdset = await Adset.findOne({
+      _id: id,
+      userId: req.userId,
+    }).populate('campaignId');
+
+    if (!targetAdset) {
+      res.status(404).json({ error: 'Target adset not found' });
+      return;
+    }
+
+    // Check if target adset is deployed
+    if (targetAdset.facebookAdsetId) {
+      res.status(400).json({ error: 'Cannot copy settings to a deployed adset. Please create a new adset instead.' });
+      return;
+    }
+
+    // Find source adset
+    const sourceAdset = await Adset.findOne({
+      _id: sourceAdsetId,
+      userId: req.userId,
+    }).populate('campaignId');
+
+    if (!sourceAdset) {
+      res.status(404).json({ error: 'Source adset not found' });
+      return;
+    }
+
+    const campaign: any = targetAdset.campaignId;
+
+    // If source adset has Facebook ID, fetch full details from Facebook
+    let facebookDetails: any = null;
+    if (sourceAdset.facebookAdsetId) {
+      try {
+        const { FacebookAccount } = await import('../models/FacebookAccount');
+        const facebookAccount = await FacebookAccount.findById(
+          (campaign as any).facebookAccountId
+        );
+        
+        if (facebookAccount) {
+          const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
+          const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
+          
+          await TokenRefreshService.checkAndRefreshToken(facebookAccount);
+          const apiService = new FacebookApiService(facebookAccount.accessToken);
+          facebookDetails = await apiService.getAdsetDetails(sourceAdset.facebookAdsetId);
+        }
+      } catch (error: any) {
+        // Continue with local data if Facebook fetch fails
+      }
+    }
+
+    // Copy all settings to target adset
+    targetAdset.targeting = {
+      ageMin: facebookDetails?.targeting?.age_min || sourceAdset.targeting.ageMin,
+      ageMax: facebookDetails?.targeting?.age_max || sourceAdset.targeting.ageMax,
+      genders: facebookDetails?.targeting?.genders || sourceAdset.targeting.genders || [],
+      locations: facebookDetails?.targeting?.geo_locations?.countries || sourceAdset.targeting.locations || [],
+      interests: facebookDetails?.targeting?.interests 
+        ? facebookDetails.targeting.interests.map((i: any) => i.name || i.id)
+        : sourceAdset.targeting.interests || [],
+      behaviors: sourceAdset.targeting.behaviors || [],
+      detailedTargeting: sourceAdset.targeting.detailedTargeting || [],
+      placements: sourceAdset.targeting.placements || [],
+      geoLocations: facebookDetails?.targeting?.geo_locations || sourceAdset.targeting.geoLocations || {},
+      publisherPlatforms: sourceAdset.targeting.publisherPlatforms || [],
+    };
+    
+    targetAdset.budget = facebookDetails?.daily_budget 
+      ? facebookDetails.daily_budget / 100 
+      : sourceAdset.budget;
+    targetAdset.schedule = sourceAdset.schedule;
+    targetAdset.optimizationGoal = facebookDetails?.optimization_goal || sourceAdset.optimizationGoal;
+    targetAdset.billingEvent = facebookDetails?.billing_event || sourceAdset.billingEvent;
+    targetAdset.bidStrategy = facebookDetails?.bid_strategy || sourceAdset.bidStrategy;
+    targetAdset.bidAmount = facebookDetails?.bid_amount || sourceAdset.bidAmount;
+    targetAdset.promotedObject = facebookDetails?.promoted_object 
+      ? JSON.parse(JSON.stringify(facebookDetails.promoted_object))
+      : sourceAdset.promotedObject 
+        ? JSON.parse(JSON.stringify(sourceAdset.promotedObject))
+        : undefined;
+    targetAdset.attributionSpec = facebookDetails?.attribution_spec 
+      ? JSON.parse(JSON.stringify(facebookDetails.attribution_spec))
+      : sourceAdset.attributionSpec 
+        ? JSON.parse(JSON.stringify(sourceAdset.attributionSpec))
+        : undefined;
+    targetAdset.dailyBudget = facebookDetails?.daily_budget 
+      ? facebookDetails.daily_budget / 100 
+      : sourceAdset.dailyBudget;
+    targetAdset.lifetimeBudget = facebookDetails?.lifetime_budget 
+      ? facebookDetails.lifetime_budget / 100 
+      : sourceAdset.lifetimeBudget;
+    targetAdset.startTime = facebookDetails?.start_time || sourceAdset.startTime;
+    targetAdset.endTime = facebookDetails?.end_time || sourceAdset.endTime;
+
+    await targetAdset.save();
+
+    res.json({
+      success: true,
+      adset: targetAdset,
+      message: 'Adset settings copied successfully.',
+    });
+  } catch (error: any) {
+    console.error('copyAdsetSettings error:', error);
+    res.status(500).json({ error: error.message || 'Failed to copy adset settings' });
+  }
+};
+
 export const deleteAdset = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;

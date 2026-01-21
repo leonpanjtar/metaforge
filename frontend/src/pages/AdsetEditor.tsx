@@ -9,6 +9,7 @@ interface Adset {
   _id: string;
   name: string;
   campaignId?: string | { _id: string; name: string };
+  facebookAdsetId?: string;
   contentData?: {
     landingPageUrl?: string;
     angle?: string;
@@ -238,6 +239,8 @@ const AdsetEditor = () => {
   const [variantPrompt, setVariantPrompt] = useState('');
   const [variantProvider, setVariantProvider] = useState<'meta' | 'openai'>('openai');
   const [selectedPageId, setSelectedPageId] = useState<string>('');
+  const [copyFromAdsetId, setCopyFromAdsetId] = useState<string>('');
+  const [copyingSettings, setCopyingSettings] = useState(false);
   
   // Text-to-image generation state
   const [textToImagePrompt, setTextToImagePrompt] = useState('');
@@ -285,6 +288,15 @@ const AdsetEditor = () => {
       return response.data;
     },
     enabled: !!campaignId,
+  });
+
+  // Fetch all adsets for copy settings dropdown
+  const { data: allAdsets } = useQuery<Adset[]>({
+    queryKey: ['all-adsets'],
+    queryFn: async () => {
+      const response = await api.get('/adsets');
+      return response.data;
+    },
   });
 
   // Fetch assets
@@ -953,6 +965,40 @@ const AdsetEditor = () => {
     setKeywords(keywords.filter(k => k !== keyword));
   };
 
+  // Copy settings mutation
+  const copySettingsMutation = useMutation({
+    mutationFn: async (sourceAdsetId: string) => {
+      const response = await api.post(`/adsets/${adsetId}/copy-settings`, {
+        sourceAdsetId,
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adset', adsetId] });
+      alert('Adset settings copied successfully!');
+      setCopyFromAdsetId('');
+    },
+    onError: (error: any) => {
+      alert(error.response?.data?.error || 'Failed to copy adset settings');
+    },
+  });
+
+  const handleCopySettings = async () => {
+    if (!copyFromAdsetId) {
+      alert('Please select an adset to copy settings from');
+      return;
+    }
+    if (!window.confirm('This will overwrite all current adset settings (targeting, budget, optimization goals, etc.). Continue?')) {
+      return;
+    }
+    setCopyingSettings(true);
+    try {
+      await copySettingsMutation.mutateAsync(copyFromAdsetId);
+    } finally {
+      setCopyingSettings(false);
+    }
+  };
+
   const handleGenerateCopy = async () => {
     const prompt = `Generate ad copy based on:
 - Landing Page: ${landingPageUrl || 'Not provided'}
@@ -1135,6 +1181,46 @@ const AdsetEditor = () => {
           {/* Content Data Tab */}
           {activeTab === 'content' && (
             <div className="space-y-6">
+              {/* Copy Settings from Existing Adset */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Copy Adset Settings from Existing Adset
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={copyFromAdsetId}
+                    onChange={(e) => setCopyFromAdsetId(e.target.value)}
+                    disabled={!!adset?.facebookAdsetId}
+                    className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="">Select an adset to copy settings from...</option>
+                    {allAdsets
+                      ?.filter((a) => a._id !== adsetId && !a.facebookAdsetId)
+                      .map((a) => (
+                        <option key={a._id} value={a._id}>
+                          {a.name}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleCopySettings}
+                    disabled={!copyFromAdsetId || !!adset?.facebookAdsetId || copyingSettings}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {copyingSettings ? 'Copying...' : 'Copy Settings'}
+                  </button>
+                </div>
+                {adset?.facebookAdsetId && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    This adset has been deployed to Facebook. Settings cannot be changed.
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-gray-500">
+                  Copy targeting, budget, optimization goals, and other settings from another adset. This will overwrite current settings.
+                </p>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Landing Page URL
