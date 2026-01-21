@@ -55,8 +55,8 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
     const endDate = until ? new Date(until) : new Date();
     const startDate = since ? new Date(since) : new Date(endDate);
     if (!since) {
-      // default to last 30 days
-      startDate.setDate(endDate.getDate() - 30);
+      // default to last 3 months from today
+      startDate.setMonth(endDate.getMonth() - 3);
     }
 
     const dateRange = {
@@ -64,8 +64,23 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       until: endDate.toISOString().split('T')[0],
     };
 
-    // Get all adsets for this user
-    const adsets = await Adset.find({ userId: req.userId }).populate('campaignId');
+    // Get all campaigns for this user that have OUTCOME_LEADS as objective
+    const leadCampaigns = await Campaign.find({
+      userId: req.userId,
+      objective: /OUTCOME_LEADS/i,
+    });
+
+    const leadCampaignIds = leadCampaigns.map((c) => c._id);
+    if (leadCampaignIds.length === 0) {
+      res.json({ ads: [] });
+      return;
+    }
+
+    // Get all adsets for this user within those lead campaigns
+    const adsets = await Adset.find({
+      userId: req.userId,
+      campaignId: { $in: leadCampaignIds },
+    }).populate('campaignId');
     const adsetIds = adsets.map((a) => a._id);
 
     if (adsetIds.length === 0) {
@@ -109,7 +124,27 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       if (!combo.facebookAdId) continue;
 
       try {
-        const insights = await apiService.getAdInsights(combo.facebookAdId, dateRange);
+        // Log the exact query for Graph Explorer testing
+        const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
+          ? facebookAccount.accountId
+          : `act_${facebookAccount.accountId}`;
+        const adId = combo.facebookAdId;
+        const endpoint = `/${adId}/insights`;
+        const fields = 'impressions,clicks,ctr,spend,actions,outcome_results';
+        const timeRange = JSON.stringify(dateRange);
+        
+        console.log(`[getWinningAds][GraphExplorer] Query for ad ${adId}:`, {
+          endpoint: `https://graph.facebook.com/v24.0${endpoint}`,
+          method: 'GET',
+          params: {
+            fields,
+            time_range: timeRange,
+            access_token: '<ACCESS_TOKEN>',
+          },
+          exampleCurl: `curl -X GET "https://graph.facebook.com/v24.0${endpoint}?fields=${fields}&time_range=${encodeURIComponent(timeRange)}&access_token=<ACCESS_TOKEN>"`,
+        });
+        
+        const insights = await apiService.getAdInsights(adId, dateRange);
 
         const impressions = Number(insights.impressions || 0);
         const clicks = Number(insights.clicks || 0);

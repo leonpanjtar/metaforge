@@ -49,8 +49,22 @@ interface Adset {
 const WinningAds = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [since, setSince] = useState<string>('');
-  const [until, setUntil] = useState<string>('');
+  
+  // Set default dates: 3 months ago to today
+  const getDefaultDates = () => {
+    const today = new Date();
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(today.getMonth() - 3);
+    
+    return {
+      since: threeMonthsAgo.toISOString().split('T')[0],
+      until: today.toISOString().split('T')[0],
+    };
+  };
+  
+  const defaultDates = getDefaultDates();
+  const [since, setSince] = useState<string>(defaultDates.since);
+  const [until, setUntil] = useState<string>(defaultDates.until);
   const [selectedAd, setSelectedAd] = useState<WinningAd | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showImport, setShowImport] = useState(false);

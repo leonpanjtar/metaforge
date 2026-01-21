@@ -21,6 +21,7 @@ const Campaigns = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [reconnectLoading, setReconnectLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('ACTIVE');
 
   const { data: accounts, refetch: refetchAccounts } = useQuery<FacebookAccount[]>({
     queryKey: ['facebook-accounts'],
@@ -135,8 +136,27 @@ const Campaigns = () => {
           </div>
 
           {campaigns && campaigns.length > 0 ? (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
+            <>
+              <div className="mb-4 flex items-end gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Filter by Status
+                  </label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="block w-full max-w-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="ALL">All Campaigns</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="PAUSED">Paused</option>
+                    <option value="ARCHIVED">Archived</option>
+                    <option value="DELETED">Deleted</option>
+                  </select>
+                </div>
+              </div>
+              <div className="bg-white shadow rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -154,7 +174,9 @@ const Campaigns = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {campaigns.map((campaign) => (
+                  {campaigns
+                    .filter((campaign) => statusFilter === 'ALL' || campaign.status === statusFilter)
+                    .map((campaign) => (
                     <tr key={campaign._id}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {campaign.name}
@@ -191,7 +213,8 @@ const Campaigns = () => {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           ) : (
             <div className="bg-white p-6 rounded-lg shadow">
               <p className="text-gray-600">No campaigns found for this account.</p>
