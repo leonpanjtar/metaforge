@@ -238,21 +238,13 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         }
 
         // Get landing page URL from combination or adset
-        let landingPageUrl = combination.url || (adset as any).contentData?.landingPageUrl || '';
+        const landingPageUrl = combination.url || (adset as any).contentData?.landingPageUrl || '';
         if (!landingPageUrl) {
           errors.push({ 
             combinationId, 
             error: 'Landing page URL is required. Please set it in Content Data or combination.' 
           });
           continue;
-        }
-
-        // Append UTM parameters for tracking in analytics
-        const utmTemplate =
-          'utm_source=meta&utm_medium={{placement}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}';
-        if (!landingPageUrl.includes('utm_source=meta')) {
-          const separator = landingPageUrl.includes('?') ? '&' : '?';
-          landingPageUrl = `${landingPageUrl}${separator}${utmTemplate}`;
         }
 
         // Get asset
@@ -332,6 +324,9 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         const creativePayload = {
           name: `Ad Creative - ${adset.name || 'Adset'} - ${combination._id.toString()}`,
           object_story_spec: creativeSpec.object_story_spec,
+          // Meta will auto-fill these URL tags; no need to modify landing page URL
+          url_tags:
+            'utm_source=meta&utm_medium={{placement}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}',
         };
 
         // Log creative payload for Meta Graph Explorer
