@@ -84,11 +84,13 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
       ? facebookAccount.accountId
       : `act_${facebookAccount.accountId}`;
 
-    // Get all campaigns and filter to OUTCOME_LEADS
+    // Get all campaigns and filter to OUTCOME_LEADS only
     const campaigns = await apiService.getCampaigns(accountIdWithPrefix);
     const leadCampaigns = campaigns.filter(
       (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
     );
+
+    console.log(`[dashboardCacheJob] Account ${accountIdWithPrefix}: Found ${leadCampaigns.length} OUTCOME_LEADS campaigns out of ${campaigns.length} total`);
 
     // Aggregate stats
     let totalLeads = 0;
@@ -105,9 +107,28 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
     }
 
     // For each lead campaign, get insights at ad level with daily breakdown
+    // Only process campaigns that had activity in the past 30 days
     for (const campaign of leadCampaigns) {
       try {
-        const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange, 'day');
+        const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange, '1');
+
+        // Skip campaigns with no activity in the date range
+        if (rows.length === 0) {
+          console.log(`[dashboardCacheJob] Campaign ${campaign.id} has no insights in the past 30 days, skipping`);
+          continue;
+        }
+
+        // Check if campaign has any spend or activity in the date range
+        const hasActivity = rows.some((row: any) => {
+          const spend = Number(row.spend || 0);
+          const impressions = Number(row.impressions || 0);
+          return spend > 0 || impressions > 0;
+        });
+
+        if (!hasActivity) {
+          console.log(`[dashboardCacheJob] Campaign ${campaign.id} has no activity (spend/impressions) in the past 30 days, skipping`);
+          continue;
+        }
 
         for (const row of rows) {
           const schedulesData = extractSchedules(row);

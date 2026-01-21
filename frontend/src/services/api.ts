@@ -21,6 +21,11 @@ api.interceptors.request.use((config) => {
     config.headers['X-Account-Id'] = accountId;
   }
   
+  // If data is FormData, remove Content-Type header so axios can set it with boundary
+  if (config.data instanceof FormData) {
+    delete (config.headers as any)['Content-Type'];
+  }
+  
   return config;
 });
 

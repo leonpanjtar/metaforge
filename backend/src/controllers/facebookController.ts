@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { Campaign } from '../models/Campaign';
+import { UserSettings } from '../models/UserSettings';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
 import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
 
@@ -237,71 +238,147 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
 
     const { Adset } = await import('../models/Adset');
     const importedAdsets = [];
+    const updatedAdsets = [];
+    const deletedAdsets = [];
+
+    // Get all Facebook adset IDs from the response
+    const facebookAdsetIds = new Set(facebookAdsets.map((a: any) => a.id));
+
+    // Get all existing adsets for this campaign that have a facebookAdsetId
+    const existingAdsets = await Adset.find({
+      userId: req.userId,
+      campaignId: campaign._id,
+      facebookAdsetId: { $exists: true, $ne: null },
+    });
+
+    // Find adsets that were deleted on Facebook
+    for (const existing of existingAdsets) {
+      if (existing.facebookAdsetId && !facebookAdsetIds.has(existing.facebookAdsetId)) {
+        // Adset was deleted on Facebook - remove it from our database
+        await Adset.deleteOne({ _id: existing._id });
+        deletedAdsets.push(existing._id.toString());
+      }
+    }
 
     for (const fbAdset of facebookAdsets) {
-      // Check if already imported
+      // Check if already exists
       const existing = await Adset.findOne({
         userId: req.userId,
         facebookAdsetId: fbAdset.id,
       });
 
       if (existing) {
-        continue; // Skip if already imported
+        // Update existing adset with latest data from Facebook
+        try {
+          const adsetDetails = await apiService.getAdsetDetails(fbAdset.id);
+
+          // Convert Facebook targeting to our format
+          const targeting: any = {};
+          if (adsetDetails.targeting) {
+            if (adsetDetails.targeting.age_min) targeting.ageMin = adsetDetails.targeting.age_min;
+            if (adsetDetails.targeting.age_max) targeting.ageMax = adsetDetails.targeting.age_max;
+            if (adsetDetails.targeting.genders) targeting.genders = adsetDetails.targeting.genders;
+            if (adsetDetails.targeting.geo_locations?.countries) {
+              targeting.locations = adsetDetails.targeting.geo_locations.countries;
+            }
+            if (adsetDetails.targeting.interests) {
+              targeting.interests = adsetDetails.targeting.interests.map((i: any) => i.name || i.id);
+            }
+            if (adsetDetails.targeting.behaviors) {
+              targeting.behaviors = adsetDetails.targeting.behaviors.map((b: any) => b.name || b.id);
+            }
+            if (adsetDetails.targeting.publisher_platforms) {
+              targeting.placements = adsetDetails.targeting.publisher_platforms;
+            }
+          }
+
+          // Update existing adset
+          existing.name = adsetDetails.name || fbAdset.name;
+          existing.targeting = targeting;
+          existing.budget = adsetDetails.daily_budget ? adsetDetails.daily_budget / 100 : existing.budget;
+          existing.status = adsetDetails.status || fbAdset.status;
+          existing.optimizationGoal = adsetDetails.optimization_goal;
+          existing.billingEvent = adsetDetails.billing_event;
+          existing.bidStrategy = adsetDetails.bid_strategy;
+          existing.bidAmount = adsetDetails.bid_amount;
+          existing.promotedObject = adsetDetails.promoted_object;
+          existing.attributionSpec = adsetDetails.attribution_spec;
+          existing.dailyBudget = adsetDetails.daily_budget ? adsetDetails.daily_budget / 100 : existing.dailyBudget;
+          existing.lifetimeBudget = adsetDetails.lifetime_budget ? adsetDetails.lifetime_budget / 100 : existing.lifetimeBudget;
+          existing.startTime = adsetDetails.start_time;
+          existing.endTime = adsetDetails.end_time;
+
+          await existing.save();
+          updatedAdsets.push(existing);
+        } catch (error: any) {
+          console.warn(`Failed to update adset ${fbAdset.id}:`, error.message);
+          // Continue with other adsets
+        }
+        continue;
       }
 
-      // Fetch full adset details
-      const adsetDetails = await apiService.getAdsetDetails(fbAdset.id);
+      // New adset - import it
+      try {
+        // Fetch full adset details
+        const adsetDetails = await apiService.getAdsetDetails(fbAdset.id);
 
-      // Convert Facebook targeting to our format
-      const targeting: any = {};
-      if (adsetDetails.targeting) {
-        if (adsetDetails.targeting.age_min) targeting.ageMin = adsetDetails.targeting.age_min;
-        if (adsetDetails.targeting.age_max) targeting.ageMax = adsetDetails.targeting.age_max;
-        if (adsetDetails.targeting.genders) targeting.genders = adsetDetails.targeting.genders;
-        if (adsetDetails.targeting.geo_locations?.countries) {
-          targeting.locations = adsetDetails.targeting.geo_locations.countries;
+        // Convert Facebook targeting to our format
+        const targeting: any = {};
+        if (adsetDetails.targeting) {
+          if (adsetDetails.targeting.age_min) targeting.ageMin = adsetDetails.targeting.age_min;
+          if (adsetDetails.targeting.age_max) targeting.ageMax = adsetDetails.targeting.age_max;
+          if (adsetDetails.targeting.genders) targeting.genders = adsetDetails.targeting.genders;
+          if (adsetDetails.targeting.geo_locations?.countries) {
+            targeting.locations = adsetDetails.targeting.geo_locations.countries;
+          }
+          if (adsetDetails.targeting.interests) {
+            targeting.interests = adsetDetails.targeting.interests.map((i: any) => i.name || i.id);
+          }
+          if (adsetDetails.targeting.behaviors) {
+            targeting.behaviors = adsetDetails.targeting.behaviors.map((b: any) => b.name || b.id);
+          }
+          if (adsetDetails.targeting.publisher_platforms) {
+            targeting.placements = adsetDetails.targeting.publisher_platforms;
+          }
         }
-        if (adsetDetails.targeting.interests) {
-          targeting.interests = adsetDetails.targeting.interests.map((i: any) => i.name || i.id);
-        }
-        if (adsetDetails.targeting.behaviors) {
-          targeting.behaviors = adsetDetails.targeting.behaviors.map((b: any) => b.name || b.id);
-        }
-        if (adsetDetails.targeting.publisher_platforms) {
-          targeting.placements = adsetDetails.targeting.publisher_platforms;
-        }
+
+        const newAdset = new Adset({
+          userId: req.userId,
+          campaignId: campaign._id,
+          facebookAdsetId: fbAdset.id,
+          name: adsetDetails.name || fbAdset.name,
+          targeting,
+          budget: adsetDetails.daily_budget ? adsetDetails.daily_budget / 100 : 0,
+          status: adsetDetails.status || fbAdset.status,
+          optimizationGoal: adsetDetails.optimization_goal,
+          billingEvent: adsetDetails.billing_event,
+          bidStrategy: adsetDetails.bid_strategy,
+          bidAmount: adsetDetails.bid_amount,
+          promotedObject: adsetDetails.promoted_object,
+          attributionSpec: adsetDetails.attribution_spec,
+          // conversion_specs is not available on AdSet API, but conversion info is in promoted_object
+          conversionSpecs: undefined,
+          dailyBudget: adsetDetails.daily_budget ? adsetDetails.daily_budget / 100 : undefined,
+          lifetimeBudget: adsetDetails.lifetime_budget ? adsetDetails.lifetime_budget / 100 : undefined,
+          startTime: adsetDetails.start_time,
+          endTime: adsetDetails.end_time,
+          createdByApp: false, // Imported from Facebook, not created by app
+        });
+
+        await newAdset.save();
+        importedAdsets.push(newAdset);
+      } catch (error: any) {
+        console.warn(`Failed to import adset ${fbAdset.id}:`, error.message);
+        // Continue with other adsets
       }
-
-      const newAdset = new Adset({
-        userId: req.userId,
-        campaignId: campaign._id,
-        facebookAdsetId: fbAdset.id,
-        name: adsetDetails.name || fbAdset.name,
-        targeting,
-        budget: adsetDetails.daily_budget ? adsetDetails.daily_budget / 100 : 0,
-        status: adsetDetails.status || fbAdset.status,
-        optimizationGoal: adsetDetails.optimization_goal,
-        billingEvent: adsetDetails.billing_event,
-        bidStrategy: adsetDetails.bid_strategy,
-        bidAmount: adsetDetails.bid_amount,
-        promotedObject: adsetDetails.promoted_object,
-        attributionSpec: adsetDetails.attribution_spec,
-        // conversion_specs is not available on AdSet API, but conversion info is in promoted_object
-        conversionSpecs: undefined,
-        dailyBudget: adsetDetails.daily_budget ? adsetDetails.daily_budget / 100 : undefined,
-        lifetimeBudget: adsetDetails.lifetime_budget ? adsetDetails.lifetime_budget / 100 : undefined,
-        startTime: adsetDetails.start_time,
-        endTime: adsetDetails.end_time,
-      });
-
-      await newAdset.save();
-      importedAdsets.push(newAdset);
     }
 
     res.json({
       success: true,
       imported: importedAdsets.length,
-      adsets: importedAdsets,
+      updated: updatedAdsets.length,
+      deleted: deletedAdsets.length,
+      adsets: [...importedAdsets, ...updatedAdsets],
     });
   } catch (error: any) {
     console.error('Import Facebook adsets error:', error);
@@ -364,10 +441,161 @@ export const disconnectAccount = async (
     account.isActive = false;
     await account.save();
 
+    // Clear active account if this was the active one
+    const settings = await UserSettings.findOne({ userId: req.userId });
+    if (settings && settings.activeFacebookAccountId?.toString() === accountId) {
+      settings.activeFacebookAccountId = undefined;
+      settings.activeFacebookPageId = undefined;
+      settings.activeFacebookPageName = undefined;
+      await settings.save();
+    }
+
     res.json({ success: true });
   } catch (error: any) {
     console.error('Disconnect account error:', error);
     res.status(500).json({ error: 'Failed to disconnect account' });
+  }
+};
+
+// Get active Facebook account and page
+export const getActiveAccount = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const settings = await UserSettings.findOne({ userId: req.userId });
+    
+    if (!settings || !settings.activeFacebookAccountId) {
+      res.json({ activeAccount: null, activePage: null });
+      return;
+    }
+
+    const account = await FacebookAccount.findById(settings.activeFacebookAccountId)
+      .select('-accessToken');
+    
+    if (!account) {
+      // Clear invalid active account
+      settings.activeFacebookAccountId = undefined;
+      settings.activeFacebookPageId = undefined;
+      settings.activeFacebookPageName = undefined;
+      await settings.save();
+      res.json({ activeAccount: null, activePage: null });
+      return;
+    }
+
+    res.json({
+      activeAccount: {
+        _id: account._id,
+        accountId: account.accountId,
+        accountName: account.accountName,
+        isActive: account.isActive,
+      },
+      activePage: settings.activeFacebookPageId ? {
+        id: settings.activeFacebookPageId,
+        name: settings.activeFacebookPageName,
+      } : null,
+    });
+  } catch (error: any) {
+    console.error('Get active account error:', error);
+    res.status(500).json({ error: 'Failed to fetch active account' });
+  }
+};
+
+// Set active Facebook account and page
+export const setActiveAccount = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, pageId, pageName } = req.body;
+
+    if (!accountId) {
+      res.status(400).json({ error: 'Account ID is required' });
+      return;
+    }
+
+    // Verify account belongs to user
+    const account = await FacebookAccount.findOne({
+      userId: req.userId,
+      _id: accountId,
+      isActive: true,
+    });
+
+    if (!account) {
+      res.status(404).json({ error: 'Account not found or inactive' });
+      return;
+    }
+
+    // Verify page if provided
+    if (pageId) {
+      await TokenRefreshService.checkAndRefreshToken(account);
+      const apiService = new FacebookApiService(account.accessToken);
+      const pages = await apiService.getPages();
+      const pageExists = pages.some((p) => p.id === pageId);
+      
+      if (!pageExists) {
+        res.status(404).json({ error: 'Facebook page not found' });
+        return;
+      }
+    }
+
+    // Update or create settings
+    const settings = await UserSettings.findOneAndUpdate(
+      { userId: req.userId },
+      {
+        activeFacebookAccountId: accountId,
+        activeFacebookPageId: pageId || undefined,
+        activeFacebookPageName: pageName || undefined,
+      },
+      { upsert: true, new: true }
+    );
+
+    res.json({
+      success: true,
+      activeAccount: {
+        _id: account._id,
+        accountId: account.accountId,
+        accountName: account.accountName,
+      },
+      activePage: pageId ? { id: pageId, name: pageName } : null,
+    });
+  } catch (error: any) {
+    console.error('Set active account error:', error);
+    res.status(500).json({ error: error.message || 'Failed to set active account' });
+  }
+};
+
+// Get all available accounts and pages for selection
+export const getAccountsForSelection = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const accounts = await FacebookAccount.find({
+      userId: req.userId,
+      isActive: true,
+    }).select('-accessToken');
+
+    // Get pages for each account
+    const accountsWithPages = await Promise.all(
+      accounts.map(async (account) => {
+        try {
+          await TokenRefreshService.checkAndRefreshToken(account);
+          const apiService = new FacebookApiService(account.accessToken);
+          const pages = await apiService.getPages();
+          return {
+            _id: account._id,
+            accountId: account.accountId,
+            accountName: account.accountName,
+            pages: pages || [],
+          };
+        } catch (error: any) {
+          console.error(`Failed to get pages for account ${account._id}:`, error);
+          return {
+            _id: account._id,
+            accountId: account.accountId,
+            accountName: account.accountName,
+            pages: [],
+          };
+        }
+      })
+    );
+
+    res.json(accountsWithPages);
+  } catch (error: any) {
+    console.error('Get accounts for selection error:', error);
+    res.status(500).json({ error: 'Failed to fetch accounts' });
   }
 };
 

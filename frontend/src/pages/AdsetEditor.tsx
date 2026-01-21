@@ -291,11 +291,11 @@ const AdsetEditor = () => {
   });
 
   // Fetch all adsets for copy settings dropdown
-  const { data: allAdsets } = useQuery<Adset[]>({
+  const { data: allAdsets, isLoading: loadingAdsets } = useQuery<Adset[]>({
     queryKey: ['all-adsets'],
     queryFn: async () => {
       const response = await api.get('/adsets');
-      return response.data;
+      return response.data || [];
     },
   });
 
@@ -849,9 +849,14 @@ const AdsetEditor = () => {
         const imageResponse = await fetch(`${API_URL}${selectedAssetForVariants.url}`);
         const imageBlob = await imageResponse.blob();
         
+        // Convert Blob to File so multer recognizes it as a file upload
+        const imageFile = new File([imageBlob], selectedAssetForVariants.filename, {
+          type: imageBlob.type || 'image/jpeg',
+        });
+        
         // Create FormData
         const formData = new FormData();
-        formData.append('image', imageBlob, selectedAssetForVariants.filename);
+        formData.append('image', imageFile);
         formData.append('adsetId', adsetId);
         formData.append('count', variantCount.toString());
         formData.append('instructions', variantPrompt);
@@ -1193,14 +1198,22 @@ const AdsetEditor = () => {
                     disabled={!!adset?.facebookAdsetId}
                     className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
-                    <option value="">Select an adset to copy settings from...</option>
-                    {allAdsets
-                      ?.filter((a) => a._id !== adsetId && !a.facebookAdsetId)
-                      .map((a) => (
-                        <option key={a._id} value={a._id}>
-                          {a.name}
-                        </option>
-                      ))}
+                    <option value="">
+                      {loadingAdsets ? 'Loading adsets...' : 'Select an adset to copy settings from...'}
+                    </option>
+                    {loadingAdsets ? (
+                      <option value="" disabled>Loading...</option>
+                    ) : allAdsets && allAdsets.length > 0 ? (
+                      allAdsets
+                        .filter((a) => a._id !== adsetId) // Exclude current adset
+                        .map((a) => (
+                          <option key={a._id} value={a._id}>
+                            {a.name} {a.facebookAdsetId ? '(Deployed)' : ''}
+                          </option>
+                        ))
+                    ) : (
+                      <option value="" disabled>No other adsets found</option>
+                    )}
                   </select>
                   <button
                     type="button"

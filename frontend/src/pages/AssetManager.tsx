@@ -101,9 +101,8 @@ const AssetManager = () => {
 
   const generateOpenAIVariantsMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const response = await api.post('/ai/generate-image-variations-openai', data, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // Don't set Content-Type for FormData - browser will set it with boundary
+      const response = await api.post('/ai/generate-image-variations-openai', data);
       return response.data;
     },
     onSuccess: () => {
@@ -685,9 +684,14 @@ const AssetManager = () => {
                           const imageResponse = await fetch(`${API_URL}${previewAsset.url}`);
                           const imageBlob = await imageResponse.blob();
                           
+                          // Convert Blob to File so multer recognizes it as a file upload
+                          const imageFile = new File([imageBlob], previewAsset.filename, {
+                            type: imageBlob.type || 'image/jpeg',
+                          });
+                          
                           // Create FormData
                           const formData = new FormData();
-                          formData.append('image', imageBlob, previewAsset.filename);
+                          formData.append('image', imageFile);
                           formData.append('adsetId', adsetId);
                           formData.append('count', variantCount.toString());
                           formData.append('instructions', variantPrompt);

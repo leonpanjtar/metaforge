@@ -5,6 +5,7 @@ build/
 .next/
 .cache/
 .DS_Store
+backend/uploads/
 
 # Env & secrets
 .env

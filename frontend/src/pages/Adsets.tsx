@@ -22,6 +22,7 @@ interface Adset {
   billingEvent?: string;
   promotedObject?: any;
   facebookAdsetId?: string;
+  createdByApp?: boolean;
 }
 
 const Adsets = () => {
@@ -108,15 +109,22 @@ const Adsets = () => {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['adsets', campaignId] });
-      alert(`Successfully imported ${data.imported} adset(s) from Facebook with all settings!`);
+      const messages = [];
+      if (data.imported > 0) messages.push(`Imported ${data.imported} new adset(s)`);
+      if (data.updated > 0) messages.push(`Updated ${data.updated} existing adset(s)`);
+      if (data.deleted > 0) messages.push(`Removed ${data.deleted} deleted adset(s)`);
+      if (messages.length === 0) {
+        messages.push('All adsets are already in sync');
+      }
+      alert(messages.join(', ') + '!');
     },
     onError: (error: any) => {
-      alert(error.response?.data?.error || 'Failed to import adsets from Facebook');
+      alert(error.response?.data?.error || 'Failed to sync adsets from Facebook');
     },
   });
 
   const handleImportFromFacebook = () => {
-    if (window.confirm('Import all adsets from Facebook for this campaign? This will fetch all settings including conversion goals and optimization settings.')) {
+    if (window.confirm('Sync adsets with Facebook? This will:\n- Import new adsets\n- Update existing adsets\n- Remove adsets deleted on Facebook')) {
       importMutation.mutate();
     }
   };
@@ -135,9 +143,9 @@ const Adsets = () => {
             onClick={handleImportFromFacebook}
             disabled={importMutation.isPending}
             className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50"
-            title="Import adsets created directly in Facebook (with all settings)"
+            title="Sync adsets with Facebook (import new, update existing, remove deleted)"
           >
-            {importMutation.isPending ? 'Importing...' : 'Import from Facebook'}
+            {importMutation.isPending ? 'Syncing...' : 'Sync from Facebook'}
           </button>
           <Link
             to={`/adsets/create?campaignId=${campaignId}`}
@@ -172,9 +180,16 @@ const Adsets = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {adsets.map((adset) => (
-                <tr key={adset._id}>
+                <tr key={adset._id} className={adset.createdByApp ? 'bg-blue-50' : ''}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {adset.name}
+                    <div className="flex items-center gap-2">
+                      {adset.name}
+                      {adset.createdByApp && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title="Created in this app">
+                          App
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     ${adset.budget.toFixed(2)}/day
@@ -220,7 +235,7 @@ const Adsets = () => {
                       className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
                       title="Clone with ALL settings (targeting, conversion goals, optimization, billing, etc.)"
                     >
-                      {duplicatingId === adset._id ? 'Cloning...' : 'Clone All'}
+                      {duplicatingId === adset._id ? 'Copying...' : 'Copy'}
                     </button>
                     <button
                       onClick={() => handleUseAsTemplate(adset)}

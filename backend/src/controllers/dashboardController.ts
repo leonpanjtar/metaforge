@@ -81,13 +81,18 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
     const sinceStr = since.toISOString().split('T')[0]; // YYYY-MM-DD
     const untilStr = until.toISOString().split('T')[0]; // YYYY-MM-DD
 
+    console.log(`[getDashboardStats] Fetching stats for user ${req.userId}, date range: ${sinceStr} to ${untilStr}`);
+
     // Get all active Facebook accounts for the user
     const facebookAccounts = await FacebookAccount.find({
       userId: req.userId,
       isActive: true,
     });
 
+    console.log(`[getDashboardStats] Found ${facebookAccounts.length} active Facebook accounts`);
+
     if (facebookAccounts.length === 0) {
+      console.log(`[getDashboardStats] No active Facebook accounts found for user ${req.userId}`);
       res.json({
         totalLeads: 0,
         totalSpend: 0,
@@ -99,29 +104,41 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
-    // Try to get cached data first (valid for 1 hour)
+    // Check for force refresh parameter
+    const forceRefresh = req.query.forceRefresh === 'true' || req.query.forceRefresh === '1';
+
+    // Try to get cached data first (valid for 1 hour) unless force refresh is requested
     const ONE_HOUR_MS = 60 * 60 * 1000;
     const now = Date.now();
     
-    const cachePromises = facebookAccounts.map((account) =>
-      DashboardCache.findOne({
-        userId: req.userId,
-        facebookAccountId: account._id,
-        since: sinceStr,
-        until: untilStr,
-      })
-    );
+    let caches: any[] = [];
+    let validCaches: any[] = [];
 
-    const caches = await Promise.all(cachePromises);
-    const validCaches = caches.filter((cache) => {
-      if (!cache) return false;
-      // Check if cache is less than 1 hour old
-      const cacheAge = now - cache.updatedAt.getTime();
-      return cacheAge < ONE_HOUR_MS;
-    });
+    if (!forceRefresh) {
+      const cachePromises = facebookAccounts.map((account) =>
+        DashboardCache.findOne({
+          userId: req.userId,
+          facebookAccountId: account._id,
+          since: sinceStr,
+          until: untilStr,
+        })
+      );
 
-    // If we have valid cache for all accounts, return cached data
-    if (validCaches.length === facebookAccounts.length && validCaches.length > 0) {
+      caches = await Promise.all(cachePromises);
+      validCaches = caches.filter((cache) => {
+        if (!cache) return false;
+        // Check if cache is less than 1 hour old
+        const cacheAge = now - cache.updatedAt.getTime();
+        return cacheAge < ONE_HOUR_MS;
+      });
+    } else {
+      console.log(`[getDashboardStats] Force refresh requested, bypassing cache`);
+    }
+
+    // If we have valid cache for all accounts and not forcing refresh, return cached data
+    if (!forceRefresh && validCaches.length === facebookAccounts.length && validCaches.length > 0) {
+      console.log(`[getDashboardStats] Using cached data (${validCaches.length} valid caches)`);
+      
       // Aggregate cached data
       let totalLeads = 0;
       let totalSpend = 0;
@@ -147,7 +164,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
           accountsWithData++;
 
           // Aggregate daily stats
-          cache.dailyStats.forEach((day) => {
+          cache.dailyStats.forEach((day: { date: string; leads: number; spend: number }) => {
             if (dailyStatsMap[day.date]) {
               dailyStatsMap[day.date].leads += day.leads;
               dailyStatsMap[day.date].spend += day.spend;
@@ -167,34 +184,31 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
           spend: Math.round(dailyStatsMap[date].spend * 100) / 100,
         }));
 
+      const hasData = totalLeads > 0 || totalSpend > 0;
+      console.log(`[getDashboardStats] Cached data - Total Leads: ${totalLeads}, Total Spend: ${totalSpend}, Has Data: ${hasData}`);
+
       res.json({
         totalLeads: Math.round(totalLeads),
         totalSpend: Math.round(totalSpend * 100) / 100,
         averageCostPerLead: Math.round(averageCostPerLead * 100) / 100,
         averageConversionRate: Math.round(averageConversionRate * 100) / 100,
         dailyStats,
-        hasData: totalLeads > 0 || totalSpend > 0,
+        hasData,
         fromCache: true,
       });
       return;
     }
 
+    console.log(`[getDashboardStats] Cache is stale or missing, fetching live data`);
+
     // Cache is stale or missing, fetch live data and cache it
     const dateRange = { since: sinceStr, until: untilStr };
 
-    // Aggregate stats from all accounts
+    // Aggregate stats from active account
     let totalLeads = 0;
     let totalSpend = 0;
     const dailyStatsMap: Record<string, { leads: number; spend: number }> = {};
     const adConversionRates: Record<string, number> = {};
-    const accountStats: Array<{
-      accountId: string;
-      leads: number;
-      spend: number;
-      costPerLead: number;
-      conversionRate: number;
-      dailyStats: Array<{ date: string; leads: number; spend: number }>;
-    }> = [];
 
     // Initialize daily stats map
     for (let i = 0; i < 30; i++) {
@@ -215,53 +229,87 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
           ? facebookAccount.accountId
           : `act_${facebookAccount.accountId}`;
 
-        // Get all campaigns and filter to OUTCOME_LEADS
-        const campaigns = await apiService.getCampaigns(accountIdWithPrefix);
-        const leadCampaigns = campaigns.filter(
-          (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
-        );
+      // Get all campaigns and filter to OUTCOME_LEADS only
+      const campaigns = await apiService.getCampaigns(accountIdWithPrefix);
+      const leadCampaigns = campaigns.filter(
+        (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
+      );
+      console.log(`[getDashboardStats] Account ${facebookAccount.accountId}: Found ${leadCampaigns.length} OUTCOME_LEADS campaigns out of ${campaigns.length} total`);
 
-        // Per-account stats
-        let accountLeads = 0;
-        let accountSpend = 0;
-        const accountDailyStatsMap: Record<string, { leads: number; spend: number }> = {};
-        const accountAdConversionRates: Record<string, number> = {};
+      // Per-account stats
+      let accountLeads = 0;
+      let accountSpend = 0;
+      const accountDailyStatsMap: Record<string, { leads: number; spend: number }> = {};
+      const accountAdConversionRates: Record<string, number> = {};
 
-        // Initialize account daily stats map
-        for (let i = 0; i < 30; i++) {
-          const date = new Date(since);
-          date.setDate(date.getDate() + i);
-          const dateStr = date.toISOString().split('T')[0];
-          accountDailyStatsMap[dateStr] = { leads: 0, spend: 0 };
-        }
+      // Initialize account daily stats map
+      for (let i = 0; i < 30; i++) {
+        const date = new Date(since);
+        date.setDate(date.getDate() + i);
+        const dateStr = date.toISOString().split('T')[0];
+        accountDailyStatsMap[dateStr] = { leads: 0, spend: 0 };
+      }
 
-        // For each lead campaign, get insights at ad level with daily breakdown
-        for (const campaign of leadCampaigns) {
+      // For each OUTCOME_LEADS campaign, get insights at ad level with daily breakdown
+      // We'll extract schedule_website conversions from all ads
+      for (const campaign of leadCampaigns) {
           try {
-            const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange, 'day');
+            console.log(`[getDashboardStats] Fetching insights for campaign ${campaign.id} (${campaign.name})`);
+            
+            // Use time_increment=1 to get daily breakdown (Facebook API requires number, not 'day')
+            const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange, '1');
+            console.log(`[getDashboardStats] Campaign ${campaign.id}: Got ${rows.length} insight rows`);
 
+            // Skip campaigns with no activity in the date range
+            if (rows.length === 0) {
+              console.log(`[getDashboardStats] Campaign ${campaign.id} has no insights in the past 30 days, skipping`);
+              continue;
+            }
+
+            // Check if campaign has any spend or activity in the date range
+            const hasActivity = rows.some((row: any) => {
+              const spend = Number(row.spend || 0);
+              const impressions = Number(row.impressions || 0);
+              return spend > 0 || impressions > 0;
+            });
+
+            if (!hasActivity) {
+              console.log(`[getDashboardStats] Campaign ${campaign.id} has no activity (spend/impressions) in the past 30 days, skipping`);
+              continue;
+            }
+
+            // Process each row (each row is one ad for one day)
             for (const row of rows) {
+              const dateStr = row.date_start || row.date;
+              const adId = row.ad_id;
+              const spend = Number(row.spend || 0);
+
+              // Extract schedules from this ad's insights
               const schedulesData = extractSchedules(row);
               const schedules = schedulesData.count;
-              const spend = Number(row.spend || 0);
               const conversionRate = schedulesData.conversionRate;
-              const adId = row.ad_id;
 
-              accountLeads += schedules;
-              accountSpend += spend;
+              // Only count rows that have schedule_website conversions
+              if (schedules > 0) {
+                console.log(`[getDashboardStats] ✓ Found ${schedules} schedules for ${dateStr}, Ad ${adId}, Spend: $${spend.toFixed(2)}`);
 
-              // Store conversion rate per ad
-              if (conversionRate > 0) {
-                if (!accountAdConversionRates[adId] || conversionRate > accountAdConversionRates[adId]) {
-                  accountAdConversionRates[adId] = conversionRate;
+                // Add to account totals
+                accountLeads += schedules;
+                accountSpend += spend;
+
+                // Store conversion rate per ad (use adId + date as key to handle same ad across multiple days)
+                if (conversionRate > 0) {
+                  const rateKey = `${adId}_${dateStr}`;
+                  if (!accountAdConversionRates[rateKey] || conversionRate > accountAdConversionRates[rateKey]) {
+                    accountAdConversionRates[rateKey] = conversionRate;
+                  }
                 }
-              }
 
-              // Aggregate daily stats
-              const dateStr = row.date_start || row.date;
-              if (dateStr && accountDailyStatsMap[dateStr]) {
-                accountDailyStatsMap[dateStr].leads += schedules;
-                accountDailyStatsMap[dateStr].spend += spend;
+                // Aggregate daily stats
+                if (dateStr && accountDailyStatsMap[dateStr]) {
+                  accountDailyStatsMap[dateStr].leads += schedules;
+                  accountDailyStatsMap[dateStr].spend += spend;
+                }
               }
             }
           } catch (error: any) {
@@ -348,13 +396,17 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         spend: Math.round(dailyStatsMap[date].spend * 100) / 100,
       }));
 
+    const hasData = totalLeads > 0 || totalSpend > 0;
+    console.log(`[getDashboardStats] Live data - Total Leads: ${totalLeads}, Total Spend: ${totalSpend}, Has Data: ${hasData}`);
+    console.log(`[getDashboardStats] Daily stats count: ${dailyStats.length}, Days with data: ${dailyStats.filter(d => d.leads > 0 || d.spend > 0).length}`);
+
     res.json({
       totalLeads: Math.round(totalLeads),
       totalSpend: Math.round(totalSpend * 100) / 100,
       averageCostPerLead: Math.round(averageCostPerLead * 100) / 100,
       averageConversionRate: Math.round(averageConversionRate * 100) / 100,
       dailyStats,
-      hasData: totalLeads > 0 || totalSpend > 0,
+      hasData,
       fromCache: false,
     });
   } catch (error: any) {
@@ -419,4 +471,5 @@ export const getFacebookConnectionStatus = async (req: AuthRequest, res: Respons
     res.status(500).json({ error: error.message || 'Failed to fetch connection status' });
   }
 };
+
 

@@ -25,11 +25,8 @@ const CreativeGenerator = () => {
 
   const generateSingleVariationMutation = useMutation({
     mutationFn: async ({ formData, index }: { formData: FormData; index: number }) => {
-      const response = await api.post('/ai/generate-single-variation', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      // Don't set Content-Type for FormData - axios will set it automatically with boundary
+      const response = await api.post('/ai/generate-single-variation', formData);
       return { ...response.data, index };
     },
   });

@@ -174,7 +174,10 @@ export class FacebookApiService {
         time_range: JSON.stringify(dateRange),
       };
 
-      if (timeIncrement) {
+      // Facebook API accepts '1' for daily breakdown, or 'all_days' for aggregated
+      if (timeIncrement === 'day') {
+        params.time_increment = '1'; // Use '1' for daily breakdown
+      } else if (timeIncrement) {
         params.time_increment = timeIncrement;
       }
 

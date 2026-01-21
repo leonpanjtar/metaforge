@@ -52,6 +52,7 @@ export interface IAdset extends Document {
     facebookPageId?: string;
     facebookPageName?: string;
   };
+  createdByApp?: boolean; // True if created through the app, false/undefined if imported from Facebook
   createdAt: Date;
   updatedAt: Date;
 }
@@ -128,6 +129,10 @@ const AdsetSchema = new Schema<IAdset>(
       baseAssets: [{ type: Schema.Types.ObjectId, ref: 'Asset' }],
     facebookPageId: { type: String, default: '' },
     facebookPageName: { type: String, default: '' },
+    },
+    createdByApp: {
+      type: Boolean,
+      default: false,
     },
   },
   {

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import FacebookConnector from '../components/FacebookConnector';
@@ -36,13 +37,22 @@ interface FacebookStatus {
 const Dashboard = () => {
   const { currentAccount } = useAuth();
 
-  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
-    queryKey: ['dashboard-stats'],
+  const [forceRefresh, setForceRefresh] = useState(0);
+
+  const { data: stats, isLoading: statsLoading, isFetching, refetch } = useQuery<DashboardStats>({
+    queryKey: ['dashboard-stats', forceRefresh],
     queryFn: async () => {
-      const response = await api.get('/dashboard/stats');
+      const response = await api.get('/dashboard/stats', {
+        params: forceRefresh > 0 ? { forceRefresh: 'true' } : {},
+      });
       return response.data;
     },
   });
+
+  const handleForceRefresh = () => {
+    setForceRefresh((prev) => prev + 1);
+    refetch();
+  };
 
   const { data: facebookStatus, refetch: refetchFacebookStatus } = useQuery<FacebookStatus>({
     queryKey: ['facebook-status'],
@@ -123,6 +133,155 @@ const Dashboard = () => {
     );
   };
 
+  // Beautiful bar chart component for daily conversions
+  const BarChart = ({ data }: { data: DashboardStats['dailyStats'] }) => {
+    if (!data || data.length === 0) return null;
+
+    const maxLeads = Math.max(...data.map((d) => d.leads), 1);
+    const chartHeight = 300;
+    const barWidth = Math.max(4, (100 / data.length) * 0.8);
+    const barSpacing = (100 / data.length) * 0.2;
+    const padding = 40;
+
+    // Filter to show only days with data, or show all days
+    const daysWithData = data.filter((d) => d.leads > 0 || d.spend > 0);
+    const displayData = daysWithData.length > 0 ? daysWithData : data;
+
+    return (
+      <div className="relative">
+        <svg width="100%" height={chartHeight + padding} className="overflow-visible">
+          <defs>
+            <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="rgba(139, 92, 246, 0.9)" />
+              <stop offset="50%" stopColor="rgba(139, 92, 246, 0.7)" />
+              <stop offset="100%" stopColor="rgba(139, 92, 246, 0.5)" />
+            </linearGradient>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="2" result="coloredBlur" />
+              <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          {/* Y-axis labels */}
+          {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+            const value = Math.round(maxLeads * ratio);
+            const y = chartHeight - ratio * chartHeight;
+            return (
+              <g key={ratio}>
+                <line
+                  x1="0"
+                  y1={y + padding}
+                  x2="100%"
+                  y2={y + padding}
+                  stroke="rgba(229, 231, 235, 0.5)"
+                  strokeWidth="1"
+                  strokeDasharray="2,2"
+                />
+                <text
+                  x="0"
+                  y={y + padding + 4}
+                  fontSize="11"
+                  fill="#6B7280"
+                  textAnchor="start"
+                >
+                  {value}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Bars */}
+          {displayData.map((day, i) => {
+            const barHeight = (day.leads / maxLeads) * chartHeight;
+            const x = (i / displayData.length) * 100 + barSpacing / 2;
+            const y = chartHeight - barHeight + padding;
+            const date = new Date(day.date);
+            const isToday = date.toDateString() === new Date().toDateString();
+            const hasData = day.leads > 0;
+
+            return (
+              <g key={day.date}>
+                {/* Bar */}
+                <rect
+                  x={`${x}%`}
+                  y={y}
+                  width={`${barWidth}%`}
+                  height={barHeight}
+                  fill={hasData ? "url(#barGradient)" : "rgba(229, 231, 235, 0.3)"}
+                  rx="4"
+                  ry="4"
+                  filter={hasData ? "url(#glow)" : undefined}
+                  className="transition-all duration-300 hover:opacity-80"
+                  style={{ cursor: 'pointer' }}
+                >
+                  <title>
+                    {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}: {day.leads} conversions, ${day.spend.toFixed(2)} spend
+                  </title>
+                </rect>
+
+                {/* Date label (rotate for better fit) */}
+                {i % Math.ceil(displayData.length / 10) === 0 && (
+                  <text
+                    x={`${x + barWidth / 2}%`}
+                    y={chartHeight + padding + 16}
+                    fontSize="10"
+                    fill="#6B7280"
+                    textAnchor="middle"
+                    transform={`rotate(-45 ${x + barWidth / 2}% ${chartHeight + padding + 16})`}
+                  >
+                    {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </text>
+                )}
+
+                {/* Value label on top of bar */}
+                {hasData && barHeight > 20 && (
+                  <text
+                    x={`${x + barWidth / 2}%`}
+                    y={y - 4}
+                    fontSize="11"
+                    fill="#4B5563"
+                    textAnchor="middle"
+                    fontWeight="600"
+                  >
+                    {day.leads}
+                  </text>
+                )}
+
+                {/* Highlight today */}
+                {isToday && (
+                  <rect
+                    x={`${x}%`}
+                    y={y}
+                    width={`${barWidth}%`}
+                    height={barHeight}
+                    fill="none"
+                    stroke="rgba(59, 130, 246, 0.8)"
+                    strokeWidth="2"
+                    rx="4"
+                    ry="4"
+                  />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Legend */}
+        <div className="mt-4 flex items-center justify-center gap-6 text-sm text-gray-600">
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" className="rounded">
+              <rect width="16" height="16" fill="url(#barGradient)" rx="2" />
+            </svg>
+            <span>Conversions</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="px-4 py-6 sm:px-0">
       <div className="mb-8">
@@ -174,7 +333,18 @@ const Dashboard = () => {
         {/* Performance Metrics */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Performance Metrics</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Performance Metrics</h2>
+              <button
+                onClick={handleForceRefresh}
+                disabled={isFetching}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Force refresh data from Facebook"
+              >
+                <HiArrowPath className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
+                {isFetching ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
             
             {statsLoading ? (
               <div className="text-center py-12">
@@ -206,6 +376,12 @@ const Dashboard = () => {
                 <div className="mt-6">
                   <h3 className="text-sm font-medium text-gray-700 mb-3">Leads Over Time (Last 30 Days)</h3>
                   <LineChart data={stats.dailyStats} />
+                </div>
+
+                {/* Daily Conversions Bar Chart */}
+                <div className="mt-6">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Daily Conversions by Date</h3>
+                  <BarChart data={stats.dailyStats} />
                 </div>
               </>
             ) : (

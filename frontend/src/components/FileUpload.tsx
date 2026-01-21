@@ -58,11 +58,8 @@ const FileUpload = ({ adsetId, onUploadComplete }: FileUploadProps) => {
         formData.append('files', file);
       });
 
-      await api.post('/assets/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      // Don't set Content-Type for FormData - axios will set it automatically with boundary
+      await api.post('/assets/upload', formData);
 
       if (onUploadComplete) {
         onUploadComplete();

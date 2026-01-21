@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { Adset } from '../models/Adset';
 import { Campaign } from '../models/Campaign';
@@ -47,6 +48,7 @@ export const createAdset = async (req: AuthRequest, res: Response): Promise<void
       lifetimeBudget,
       startTime,
       endTime,
+      createdByApp: true, // Mark as created by the app
     });
 
     await adset.save();
@@ -62,15 +64,19 @@ export const getAdsets = async (req: AuthRequest, res: Response): Promise<void> 
   try {
     const { campaignId } = req.query;
 
-    // Get account filter
-    const accountFilter = await getAccountFilter(req);
-
     const query: any = { userId: req.userId };
-    if (accountFilter.accountId) {
-      query.accountId = accountFilter.accountId;
-    }
+    
+    // Don't filter by accountId - return all adsets for the user
+    // This ensures backward compatibility with adsets that don't have accountId set
+    
     if (campaignId) {
-      query.campaignId = campaignId;
+      // Convert campaignId string to ObjectId
+      try {
+        query.campaignId = new mongoose.Types.ObjectId(campaignId as string);
+      } catch (error) {
+        res.status(400).json({ error: 'Invalid campaignId format' });
+        return;
+      }
     }
 
     const adsets = await Adset.find(query)
@@ -416,19 +422,14 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
     const { id } = req.params;
     const { name, campaignId } = req.body;
 
-    // Get account filter
+    // Get account filter (for setting on new adset, not for querying)
     const accountFilter = await getAccountFilter(req);
 
-    // Find the source adset
-    const query: any = {
+    // Find the source adset - don't filter by accountId for backward compatibility
+    const sourceAdset = await Adset.findOne({
       _id: id,
       userId: req.userId,
-    };
-    if (accountFilter.accountId) {
-      query.accountId = accountFilter.accountId;
-    }
-
-    const sourceAdset = await Adset.findOne(query).populate('campaignId');
+    }).populate('campaignId');
 
     if (!sourceAdset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -438,16 +439,11 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
     // Use provided campaignId or keep the same campaign
     const targetCampaignId = campaignId || (sourceAdset.campaignId as any)._id;
 
-    // Verify the target campaign belongs to the user and account
-    const campaignQuery: any = {
+    // Verify the target campaign belongs to the user
+    const campaign = await Campaign.findOne({
       _id: targetCampaignId,
       userId: req.userId,
-    };
-    if (accountFilter.accountId) {
-      campaignQuery.accountId = accountFilter.accountId;
-    }
-
-    const campaign = await Campaign.findOne(campaignQuery);
+    });
 
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found' });
@@ -531,6 +527,7 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
         : sourceAdset.lifetimeBudget,
       startTime: facebookDetails?.start_time || sourceAdset.startTime,
       endTime: facebookDetails?.end_time || sourceAdset.endTime,
+      createdByApp: true, // Duplicated adsets are also created by the app
     });
 
     await duplicatedAdset.save();

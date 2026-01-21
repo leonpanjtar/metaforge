@@ -106,7 +106,7 @@ const Campaigns = () => {
 
       {accounts && accounts.length > 0 && (
         <>
-          <div className="mb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-end gap-4">
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Facebook Account
@@ -114,7 +114,7 @@ const Campaigns = () => {
               <select
                 value={selectedAccountId}
                 onChange={(e) => setSelectedAccountId(e.target.value)}
-                className="block w-full max-w-md rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
               >
                 {accounts.map((account) => (
                   <option key={account._id} value={account._id}>
@@ -123,6 +123,24 @@ const Campaigns = () => {
                 ))}
               </select>
             </div>
+            {campaigns && campaigns.length > 0 && (
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Filter by Status
+                </label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="ALL">All Campaigns</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="PAUSED">Paused</option>
+                  <option value="ARCHIVED">Archived</option>
+                  <option value="DELETED">Deleted</option>
+                </select>
+              </div>
+            )}
             <div>
               <button
                 type="button"
@@ -137,24 +155,6 @@ const Campaigns = () => {
 
           {campaigns && campaigns.length > 0 ? (
             <>
-              <div className="mb-4 flex items-end gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Filter by Status
-                  </label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="block w-full max-w-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  >
-                    <option value="ALL">All Campaigns</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="PAUSED">Paused</option>
-                    <option value="ARCHIVED">Archived</option>
-                    <option value="DELETED">Deleted</option>
-                  </select>
-                </div>
-              </div>
               <div className="bg-white shadow rounded-lg overflow-hidden">
                 <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">

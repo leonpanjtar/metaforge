@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
 import Campaigns from './pages/Campaigns';
 import Adsets from './pages/Adsets';
 import AdsetCreator from './pages/AdsetCreator';
@@ -47,7 +46,7 @@ function App() {
               </PrivateRoute>
             }
           >
-            <Route index element={<Dashboard />} />
+            <Route index element={<Campaigns />} />
             <Route path="campaigns" element={<Campaigns />} />
             <Route path="adsets/:campaignId" element={<Adsets />} />
             <Route path="adsets/create" element={<AdsetCreator />} />
