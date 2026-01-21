@@ -14,6 +14,7 @@ import Combinations from './pages/Combinations';
 import Deployment from './pages/Deployment';
 import WinningAds from './pages/WinningAds';
 import Performance from './pages/Performance';
+import AccountManagement from './pages/AccountManagement';
 import Layout from './components/Layout';
 
 const queryClient = new QueryClient();
@@ -58,6 +59,7 @@ function App() {
             <Route path="deployment/:adsetId" element={<Deployment />} />
             <Route path="performance/:adsetId" element={<Performance />} />
             <Route path="winning-ads" element={<WinningAds />} />
+            <Route path="account/:accountId" element={<AccountManagement />} />
           </Route>
         </Routes>
       </BrowserRouter>

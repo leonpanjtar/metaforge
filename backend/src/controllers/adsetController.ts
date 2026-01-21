@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { Adset } from '../models/Adset';
 import { Campaign } from '../models/Campaign';
+import { getAccountFilter } from '../utils/accountFilter';
 
 export const createAdset = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -12,9 +13,13 @@ export const createAdset = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
+    // Get account filter
+    const accountFilter = await getAccountFilter(req);
+
     const campaign = await Campaign.findOne({
       _id: campaignId,
       userId: req.userId,
+      ...(accountFilter.accountId ? { accountId: accountFilter.accountId } : {}),
     });
 
     if (!campaign) {
@@ -24,6 +29,7 @@ export const createAdset = async (req: AuthRequest, res: Response): Promise<void
 
     const adset = new Adset({
       userId: req.userId,
+      accountId: accountFilter.accountId,
       campaignId,
       name,
       targeting,
@@ -56,7 +62,13 @@ export const getAdsets = async (req: AuthRequest, res: Response): Promise<void> 
   try {
     const { campaignId } = req.query;
 
+    // Get account filter
+    const accountFilter = await getAccountFilter(req);
+
     const query: any = { userId: req.userId };
+    if (accountFilter.accountId) {
+      query.accountId = accountFilter.accountId;
+    }
     if (campaignId) {
       query.campaignId = campaignId;
     }
@@ -68,7 +80,7 @@ export const getAdsets = async (req: AuthRequest, res: Response): Promise<void> 
     res.json(adsets);
   } catch (error: any) {
     console.error('Get adsets error:', error);
-    res.status(500).json({ error: 'Failed to fetch adsets' });
+    res.status(500).json({ error: error.message || 'Failed to fetch adsets' });
   }
 };
 
@@ -76,10 +88,18 @@ export const getAdset = async (req: AuthRequest, res: Response): Promise<void> =
   try {
     const { id } = req.params;
 
-    const adset = await Adset.findOne({
+    // Get account filter
+    const accountFilter = await getAccountFilter(req);
+
+    const query: any = {
       _id: id,
       userId: req.userId,
-    }).populate('campaignId', 'name');
+    };
+    if (accountFilter.accountId) {
+      query.accountId = accountFilter.accountId;
+    }
+
+    const adset = await Adset.findOne(query).populate('campaignId', 'name');
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -89,7 +109,7 @@ export const getAdset = async (req: AuthRequest, res: Response): Promise<void> =
     res.json(adset);
   } catch (error: any) {
     console.error('Get adset error:', error);
-    res.status(500).json({ error: 'Failed to fetch adset' });
+    res.status(500).json({ error: error.message || 'Failed to fetch adset' });
   }
 };
 
@@ -328,8 +348,6 @@ export const copyAdsetSettings = async (req: AuthRequest, res: Response): Promis
       behaviors: sourceAdset.targeting.behaviors || [],
       detailedTargeting: sourceAdset.targeting.detailedTargeting || [],
       placements: sourceAdset.targeting.placements || [],
-      geoLocations: facebookDetails?.targeting?.geo_locations || sourceAdset.targeting.geoLocations || {},
-      publisherPlatforms: sourceAdset.targeting.publisherPlatforms || [],
     };
     
     targetAdset.budget = facebookDetails?.daily_budget 
@@ -398,11 +416,19 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
     const { id } = req.params;
     const { name, campaignId } = req.body;
 
+    // Get account filter
+    const accountFilter = await getAccountFilter(req);
+
     // Find the source adset
-    const sourceAdset = await Adset.findOne({
+    const query: any = {
       _id: id,
       userId: req.userId,
-    }).populate('campaignId');
+    };
+    if (accountFilter.accountId) {
+      query.accountId = accountFilter.accountId;
+    }
+
+    const sourceAdset = await Adset.findOne(query).populate('campaignId');
 
     if (!sourceAdset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -412,11 +438,16 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
     // Use provided campaignId or keep the same campaign
     const targetCampaignId = campaignId || (sourceAdset.campaignId as any)._id;
 
-    // Verify the target campaign belongs to the user
-    const campaign = await Campaign.findOne({
+    // Verify the target campaign belongs to the user and account
+    const campaignQuery: any = {
       _id: targetCampaignId,
       userId: req.userId,
-    });
+    };
+    if (accountFilter.accountId) {
+      campaignQuery.accountId = accountFilter.accountId;
+    }
+
+    const campaign = await Campaign.findOne(campaignQuery);
 
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found' });
@@ -452,6 +483,7 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
     // Create duplicate adset with ALL settings - deep copy everything
     const duplicatedAdset = new Adset({
       userId: req.userId,
+      accountId: accountFilter.accountId,
       campaignId: targetCampaignId,
       name: newName,
       // Deep copy targeting

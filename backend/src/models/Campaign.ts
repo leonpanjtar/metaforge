@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface ICampaign extends Document {
   userId: mongoose.Types.ObjectId;
+  accountId?: mongoose.Types.ObjectId; // Optional for backward compatibility
   facebookAccountId: mongoose.Types.ObjectId;
   facebookCampaignId: string;
   name: string;
@@ -17,6 +18,11 @@ const CampaignSchema = new Schema<ICampaign>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+    },
+    accountId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Account',
+      required: false,
     },
     facebookAccountId: {
       type: Schema.Types.ObjectId,

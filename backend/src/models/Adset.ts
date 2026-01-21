@@ -13,6 +13,7 @@ export interface ITargeting {
 
 export interface IAdset extends Document {
   userId: mongoose.Types.ObjectId;
+  accountId?: mongoose.Types.ObjectId; // Optional for backward compatibility
   campaignId: mongoose.Types.ObjectId;
   facebookAdsetId?: string;
   name: string;
@@ -72,6 +73,11 @@ const AdsetSchema = new Schema<IAdset>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+    },
+    accountId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Account',
+      required: false,
     },
     campaignId: {
       type: Schema.Types.ObjectId,

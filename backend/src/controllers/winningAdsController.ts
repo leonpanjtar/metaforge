@@ -8,6 +8,7 @@ import { AdCombination } from '../models/AdCombination';
 import { Asset } from '../models/Asset';
 import { AdCopy } from '../models/AdCopy';
 import { WinningAdsCache } from '../models/WinningAdsCache';
+import { getAccountFilter } from '../utils/accountFilter';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs/promises';
@@ -632,10 +633,14 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       return;
     }
 
-    // Verify campaign belongs to user
+    // Get account filter
+    const accountFilter = await getAccountFilter(req);
+
+    // Verify campaign belongs to user and account
     const campaign = await Campaign.findOne({
       _id: campaignId,
       userId: req.userId,
+      ...(accountFilter.accountId ? { accountId: accountFilter.accountId } : {}),
     });
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found or access denied' });
@@ -666,6 +671,7 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
     // Create new adset
     const newAdset = new Adset({
       userId: req.userId,
+      accountId: accountFilter.accountId,
       campaignId: campaign._id,
       name: adsetName,
       targeting: {

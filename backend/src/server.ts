@@ -13,7 +13,10 @@ import combinationRoutes from './routes/combinationRoutes';
 import deploymentRoutes from './routes/deploymentRoutes';
 import performanceRoutes from './routes/performanceRoutes';
 import winningAdsRoutes from './routes/winningAdsRoutes';
+import accountRoutes from './routes/accountRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
 import { startPerformanceSyncJob } from './jobs/performanceSyncJob';
+import { startDashboardCacheJob } from './jobs/dashboardCacheJob';
 
 dotenv.config();
 
@@ -37,6 +40,8 @@ app.use('/api/combinations', combinationRoutes);
 app.use('/api/deployment', deploymentRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/winning-ads', winningAdsRoutes);
+app.use('/api/accounts', accountRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -46,8 +51,9 @@ const startServer = async () => {
   try {
     await connectDatabase();
     
-    // Start performance sync job
+    // Start background jobs
     startPerformanceSyncJob();
+    startDashboardCacheJob();
     
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

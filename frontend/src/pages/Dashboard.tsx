@@ -1,34 +1,284 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import api from '../services/api';
+import { useAuth } from '../hooks/useAuth';
+import FacebookConnector from '../components/FacebookConnector';
+import { HiCheckCircle, HiXCircle, HiArrowPath } from 'react-icons/hi2';
+
+interface DashboardStats {
+  totalLeads: number;
+  totalSpend: number;
+  averageCostPerLead: number;
+  averageConversionRate: number;
+  dailyStats: Array<{
+    date: string;
+    leads: number;
+    spend: number;
+  }>;
+  hasData: boolean;
+}
+
+interface FacebookStatus {
+  hasConnection: boolean;
+  hasActiveConnection: boolean;
+  connectionStatus: 'active' | 'expired';
+  accountCount: number;
+  activeAccountCount: number;
+  canManageConnection: boolean;
+  accounts: Array<{
+    _id: string;
+    accountName: string;
+    isActive: boolean;
+    expiresAt?: Date;
+  }>;
+}
 
 const Dashboard = () => {
+  const { currentAccount } = useAuth();
+
+  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
+    queryKey: ['dashboard-stats'],
+    queryFn: async () => {
+      const response = await api.get('/dashboard/stats');
+      return response.data;
+    },
+  });
+
+  const { data: facebookStatus, refetch: refetchFacebookStatus } = useQuery<FacebookStatus>({
+    queryKey: ['facebook-status'],
+    queryFn: async () => {
+      const response = await api.get('/dashboard/facebook-status');
+      return response.data;
+    },
+  });
+
+  const handleReconnectFacebook = async () => {
+    try {
+      const response = await api.get('/facebook/auth-url');
+      window.location.href = response.data.authUrl;
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to initiate Facebook connection');
+    }
+  };
+
+  // Simple line chart component
+  const LineChart = ({ data }: { data: DashboardStats['dailyStats'] }) => {
+    if (!data || data.length === 0) return null;
+
+    const maxLeads = Math.max(...data.map((d) => d.leads), 1);
+    const chartHeight = 200;
+
+    return (
+      <div className="relative" style={{ height: `${chartHeight}px` }}>
+        <svg width="100%" height={chartHeight} className="overflow-visible">
+          <defs>
+            <linearGradient id="leadGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="rgba(59, 130, 246, 0.3)" />
+              <stop offset="100%" stopColor="rgba(59, 130, 246, 0.05)" />
+            </linearGradient>
+          </defs>
+          
+          {/* Area fill */}
+          <path
+            d={`M 0 ${chartHeight} ${data
+              .map((d, i) => {
+                const x = (i / (data.length - 1)) * 100;
+                const y = chartHeight - (d.leads / maxLeads) * chartHeight;
+                return `L ${x}% ${y}`;
+              })
+              .join(' ')} L 100% ${chartHeight} Z`}
+            fill="url(#leadGradient)"
+          />
+          
+          {/* Line */}
+          <polyline
+            points={data
+              .map((d, i) => {
+                const x = (i / (data.length - 1)) * 100;
+                const y = chartHeight - (d.leads / maxLeads) * chartHeight;
+                return `${x}%,${y}`;
+              })
+              .join(' ')}
+            fill="none"
+            stroke="rgb(59, 130, 246)"
+            strokeWidth="2"
+          />
+          
+          {/* Data points */}
+          {data.map((d, i) => {
+            const x = (i / (data.length - 1)) * 100;
+            const y = chartHeight - (d.leads / maxLeads) * chartHeight;
+            return (
+              <circle
+                key={i}
+                cx={`${x}%`}
+                cy={y}
+                r="4"
+                fill="rgb(59, 130, 246)"
+              />
+            );
+          })}
+        </svg>
+      </div>
+    );
+  };
+
   return (
     <div className="px-4 py-6 sm:px-0">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Manage your Facebook Ads campaigns and optimize performance
+          Performance overview for the last 30 days
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <Link
-          to="/campaigns"
-          className="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
-        >
-          <h3 className="text-lg font-semibold text-gray-900">Campaigns</h3>
-          <p className="mt-2 text-sm text-gray-600">
-            View and manage your Facebook ad campaigns
-          </p>
-        </Link>
+      {/* Quick Links */}
+      <div className="mb-8">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <Link
+            to="/campaigns"
+            className="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Campaigns</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              View and manage your Facebook ad campaigns
+            </p>
+          </Link>
 
-        <div className="block p-6 bg-white rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-900">Quick Stats</h3>
-          <p className="mt-2 text-sm text-gray-600">Coming soon</p>
+          <Link
+            to="/winning-ads"
+            className="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Winning Ads</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Analyze top-performing ads and create variants
+            </p>
+          </Link>
+
+          {currentAccount && (
+            <Link
+              to={`/account/${currentAccount._id}`}
+              className="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+            >
+              <h3 className="text-lg font-semibold text-gray-900">User Management</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                Manage team members and account settings
+              </p>
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* Performance Metrics and Facebook Connection */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Performance Metrics */}
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Performance Metrics</h2>
+            
+            {statsLoading ? (
+              <div className="text-center py-12">
+                <div className="text-gray-500">Loading performance data...</div>
+              </div>
+            ) : stats && stats.hasData ? (
+              <>
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-blue-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600 mb-1">Total Leads</div>
+                    <div className="text-2xl font-bold text-gray-900">{stats.totalLeads.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600 mb-1">Total Spend</div>
+                    <div className="text-2xl font-bold text-gray-900">${stats.totalSpend.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600 mb-1">Avg Cost per Lead</div>
+                    <div className="text-2xl font-bold text-gray-900">${stats.averageCostPerLead.toFixed(2)}</div>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-4">
+                    <div className="text-sm text-gray-600 mb-1">Conversion Rate</div>
+                    <div className="text-2xl font-bold text-gray-900">{stats.averageConversionRate.toFixed(2)}%</div>
+                  </div>
+                </div>
+
+                {/* Leads Chart */}
+                <div className="mt-6">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Leads Over Time (Last 30 Days)</h3>
+                  <LineChart data={stats.dailyStats} />
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-12">
+                <div className="text-gray-500 mb-4">No performance data available</div>
+                <p className="text-sm text-gray-400">
+                  Connect your Facebook account and start running ads to see performance metrics here.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="block p-6 bg-white rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
-          <p className="mt-2 text-sm text-gray-600">Coming soon</p>
+        {/* Facebook Connection Status */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Facebook Connection</h2>
+          
+          {facebookStatus ? (
+            <>
+              {facebookStatus.hasConnection ? (
+                <div className="space-y-4">
+                  <div className={`flex items-center gap-2 p-3 rounded-lg ${
+                    facebookStatus.hasActiveConnection 
+                      ? 'bg-green-50 border border-green-200' 
+                      : 'bg-yellow-50 border border-yellow-200'
+                  }`}>
+                    {facebookStatus.hasActiveConnection ? (
+                      <HiCheckCircle className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <HiXCircle className="w-5 h-5 text-yellow-600" />
+                    )}
+                    <div className="text-sm font-medium text-gray-900">
+                      {facebookStatus.hasActiveConnection ? 'Active' : 'Expired'}
+                    </div>
+                  </div>
+
+                  {facebookStatus.canManageConnection && (
+                    <button
+                      onClick={handleReconnectFacebook}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                      <HiArrowPath className="w-4 h-4" />
+                      Reconnect
+                    </button>
+                  )}
+
+                  {!facebookStatus.canManageConnection && (
+                    <div className="text-xs text-gray-500 text-center pt-2">
+                      Only admins and owners can manage Facebook connections
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {facebookStatus.canManageConnection ? (
+                    <FacebookConnector onConnected={() => refetchFacebookStatus()} />
+                  ) : (
+                    <div className="text-center py-8">
+                      <HiXCircle className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <div className="text-sm text-gray-600 mb-2">No Facebook connection</div>
+                      <div className="text-xs text-gray-500">
+                        Contact an admin or owner to connect Facebook
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <div className="text-gray-500">Loading connection status...</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -36,4 +286,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-

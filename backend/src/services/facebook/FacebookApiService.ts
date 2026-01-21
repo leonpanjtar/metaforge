@@ -148,32 +148,37 @@ export class FacebookApiService {
    */
   async getCampaignAdInsights(
     campaignId: string,
-    dateRange: { since: string; until: string }
+    dateRange: { since: string; until: string },
+    timeIncrement?: string
   ): Promise<any[]> {
     try {
-      const response = await this.api.get(`/${campaignId}/insights`, {
-        params: {
-          level: 'ad',
-          fields: [
-            'ad_id',
-            'ad_name',
-            'adset_id',
-            'adset_name',
-            'campaign_name',
-            'impressions',
-            'clicks',
-            'ctr',
-            'spend',
-            'actions',
-            'results',
-            'objective_results',
-            'cost_per_result',
-            'result_values_performance_indicator',
-            'result_rate',
-          ].join(','),
-          time_range: JSON.stringify(dateRange),
-        },
-      });
+      const params: any = {
+        level: 'ad',
+        fields: [
+          'ad_id',
+          'ad_name',
+          'adset_id',
+          'adset_name',
+          'campaign_name',
+          'impressions',
+          'clicks',
+          'ctr',
+          'spend',
+          'actions',
+          'results',
+          'objective_results',
+          'cost_per_result',
+          'result_values_performance_indicator',
+          'result_rate',
+        ].join(','),
+        time_range: JSON.stringify(dateRange),
+      };
+
+      if (timeIncrement) {
+        params.time_increment = timeIncrement;
+      }
+
+      const response = await this.api.get(`/${campaignId}/insights`, { params });
       return response.data.data || [];
     } catch (error: any) {
       const fbError = error.response?.data?.error;

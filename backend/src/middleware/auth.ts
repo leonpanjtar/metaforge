@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 
 export interface AuthRequest extends Request {
   userId?: string;
+  accountId?: string; // Current account context (set by accountContext middleware)
 }
 
 export const authenticate = (

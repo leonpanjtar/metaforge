@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User';
+import { Account } from '../models/Account';
+import { UserAccount } from '../models/UserAccount';
 import { AuthRequest } from '../middleware/auth';
 
 const getJwtSecret = (): string => {
@@ -31,6 +33,21 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const user = new User({ email, passwordHash, name });
     await user.save();
 
+    // Create default account for new user
+    const defaultAccount = new Account({
+      name: `${name}'s Account`,
+      ownerId: user._id,
+    });
+    await defaultAccount.save();
+
+    // Create membership with owner role
+    const membership = new UserAccount({
+      userId: user._id,
+      accountId: defaultAccount._id,
+      role: 'owner',
+    });
+    await membership.save();
+
     const token = jwt.sign({ userId: user._id.toString() }, getJwtSecret(), {
       expiresIn: '7d',
     });
@@ -42,6 +59,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         email: user.email,
         name: user.name,
       },
+      defaultAccountId: defaultAccount._id.toString(),
     });
   } catch (error: any) {
     console.error('Registration error:', error);
@@ -76,6 +94,25 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Check if user has any accounts, if not create a default one (migration for existing users)
+    const existingMemberships = await UserAccount.find({ userId: user._id });
+    if (existingMemberships.length === 0) {
+      // Create default account for existing user
+      const defaultAccount = new Account({
+        name: `${user.name}'s Account`,
+        ownerId: user._id,
+      });
+      await defaultAccount.save();
+
+      // Create membership with owner role
+      const membership = new UserAccount({
+        userId: user._id,
+        accountId: defaultAccount._id,
+        role: 'owner',
+      });
+      await membership.save();
+    }
+
     const token = jwt.sign({ userId: user._id.toString() }, getJwtSecret(), {
       expiresIn: '7d',
     });
@@ -108,10 +145,23 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
+    // Get user's accounts
+    const memberships = await UserAccount.find({ userId: req.userId })
+      .populate('accountId', 'name ownerId')
+      .sort({ createdAt: -1 });
+
+    const accounts = memberships.map((m: any) => ({
+      _id: m.accountId._id,
+      name: m.accountId.name,
+      role: m.role,
+      ownerId: m.accountId.ownerId,
+    }));
+
     res.json({
       id: user._id,
       email: user.email,
       name: user.name,
+      accounts,
     });
   } catch (error) {
     console.error('Get me error:', error);

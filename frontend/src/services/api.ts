@@ -14,6 +14,13 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  
+  // Add account ID to header if available
+  const accountId = localStorage.getItem('currentAccountId');
+  if (accountId) {
+    config.headers['X-Account-Id'] = accountId;
+  }
+  
   return config;
 });
 
