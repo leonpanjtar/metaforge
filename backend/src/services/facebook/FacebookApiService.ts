@@ -353,6 +353,36 @@ export class FacebookApiService {
     }
   }
 
+  async getAdDetails(adId: string): Promise<any> {
+    try {
+      const response = await this.api.get(`/${adId}`, {
+        params: {
+          fields: 'id,name,status,adset_id,creative{object_story_spec}',
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        `Failed to fetch ad details: ${error.response?.data?.error?.message || error.message}`
+      );
+    }
+  }
+
+  async getAdCreativeDetails(creativeId: string): Promise<any> {
+    try {
+      const response = await this.api.get(`/${creativeId}`, {
+        params: {
+          fields: 'id,name,object_story_spec',
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        `Failed to fetch ad creative details: ${error.response?.data?.error?.message || error.message}`
+      );
+    }
+  }
+
   /**
    * Create an ad creative with Meta's Generative AI features enabled
    * Supports: Text Generation, Image Expansion, Background Generation
