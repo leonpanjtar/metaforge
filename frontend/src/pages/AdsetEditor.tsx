@@ -227,6 +227,11 @@ const AdsetEditor = () => {
   const [variantCount, setVariantCount] = useState(3);
   const [variantPrompt, setVariantPrompt] = useState('');
   const [variantProvider, setVariantProvider] = useState<'meta' | 'openai'>('openai');
+  
+  // Magic button popup state for single variant generation
+  const [showMagicButtonPopup, setShowMagicButtonPopup] = useState(false);
+  const [selectedAssetForMagic, setSelectedAssetForMagic] = useState<Asset | null>(null);
+  const [magicButtonInstructions, setMagicButtonInstructions] = useState('');
   const [selectedPageId, setSelectedPageId] = useState<string>('');
   const [copyFromAdsetId, setCopyFromAdsetId] = useState<string>('');
   const [copyingSettings, setCopyingSettings] = useState(false);
@@ -1992,37 +1997,13 @@ const AdsetEditor = () => {
                           {/* Generate Variant Button (magic button - generates 1 variant) */}
                           {asset.type === 'image' && (
                             <button
-                              onClick={async (e) => {
+                              onClick={(e) => {
                                 e.stopPropagation();
-                                if (!adsetId || generatingForAsset === asset._id) return;
-                                
-                                setGeneratingForAsset(asset._id);
-                                try {
-                                  const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
-                                  
-                                  // Fetch the asset file
-                                  const assetResponse = await fetch(`${API_URL}${asset.url}`);
-                                  const assetBlob = await assetResponse.blob();
-                                  
-                                  // Convert Blob to File
-                                  const assetFile = new File([assetBlob], asset.filename, {
-                                    type: assetBlob.type || 'image/jpeg',
-                                  });
-                                  
-                                  // Create FormData
-                                  const formData = new FormData();
-                                  formData.append('image', assetFile);
-                                  formData.append('adsetId', adsetId);
-                                  formData.append('count', '1'); // Generate 1 variant
-                                  formData.append('instructions', ''); // No specific instructions - use default variation
-                                  
-                                  await generateOpenAIVariantsMutation.mutateAsync(formData);
-                                  queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
-                                } catch (error: any) {
-                                  alert(error.response?.data?.error || error.message || 'Failed to generate variant');
-                                } finally {
-                                  setGeneratingForAsset(null);
-                                }
+                                if (generatingForAsset === asset._id) return;
+                                // Show popup for instructions (optional)
+                                setSelectedAssetForMagic(asset);
+                                setMagicButtonInstructions('');
+                                setShowMagicButtonPopup(true);
                               }}
                               disabled={generatingForAsset === asset._id}
                               className="flex-1 px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center"
@@ -2812,6 +2793,111 @@ const AdsetEditor = () => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Magic Button Popup for Asset Variant Generation */}
+      {showMagicButtonPopup && selectedAssetForMagic && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            setShowMagicButtonPopup(false);
+            setSelectedAssetForMagic(null);
+            setMagicButtonInstructions('');
+          }}
+        >
+          <div
+            className="bg-white rounded-lg max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Generate AI Variant</h3>
+              <button
+                onClick={() => {
+                  setShowMagicButtonPopup(false);
+                  setSelectedAssetForMagic(null);
+                  setMagicButtonInstructions('');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <HiX className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Optional Instructions
+                </label>
+                <textarea
+                  value={magicButtonInstructions}
+                  onChange={(e) => setMagicButtonInstructions(e.target.value)}
+                  rows={3}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  placeholder="Add short instructions for the AI (e.g., 'Change background to blue', 'Add more contrast', 'Make it more modern'). Leave empty for default variation."
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Leave empty to generate a default variation based on the image analysis.
+                </p>
+              </div>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={async () => {
+                    if (!adsetId || !selectedAssetForMagic || generatingForAsset === selectedAssetForMagic._id) return;
+                    
+                    setGeneratingForAsset(selectedAssetForMagic._id);
+                    setShowMagicButtonPopup(false);
+                    
+                    try {
+                      const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+                      
+                      // Fetch the asset file
+                      const assetResponse = await fetch(`${API_URL}${selectedAssetForMagic.url}`);
+                      const assetBlob = await assetResponse.blob();
+                      
+                      // Convert Blob to File
+                      const assetFile = new File([assetBlob], selectedAssetForMagic.filename, {
+                        type: assetBlob.type || 'image/jpeg',
+                      });
+                      
+                      // Create FormData
+                      const formData = new FormData();
+                      formData.append('image', assetFile);
+                      formData.append('adsetId', adsetId);
+                      formData.append('count', '1'); // Generate 1 variant
+                      formData.append('instructions', magicButtonInstructions.trim() || ''); // Use instructions if provided
+                      
+                      await generateOpenAIVariantsMutation.mutateAsync(formData);
+                      queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+                      
+                      // Reset state
+                      setSelectedAssetForMagic(null);
+                      setMagicButtonInstructions('');
+                    } catch (error: any) {
+                      alert(error.response?.data?.error || error.message || 'Failed to generate variant');
+                    } finally {
+                      setGeneratingForAsset(null);
+                    }
+                  }}
+                  disabled={generatingForAsset === selectedAssetForMagic._id}
+                  className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {generatingForAsset === selectedAssetForMagic._id ? 'Generating...' : 'Generate Variant'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMagicButtonPopup(false);
+                    setSelectedAssetForMagic(null);
+                    setMagicButtonInstructions('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
