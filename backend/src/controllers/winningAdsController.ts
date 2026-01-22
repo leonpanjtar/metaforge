@@ -301,31 +301,68 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
 
       results = [];
 
-      // STEP 1: Get all campaigns on this ad account and filter to OUTCOME_LEADS
-      const campaigns = await apiService.getCampaigns(accountIdWithPrefix);
-      const leadCampaigns = campaigns.filter(
-        (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
-      );
+      // Use account-level insights API with action_type=schedule_website filter
+      // This is the correct way to fetch winning ads data
+      try {
+        const rows = await apiService.getAccountAdInsights(accountIdWithPrefix, dateRange);
 
-      // STEP 2–4: For each lead campaign, get INSIGHTS at AD level (far fewer calls, avoids rate limits)
-      for (const campaign of leadCampaigns) {
-        try {
-          const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange);
-
-          for (const row of rows) {
-            const adId = row.ad_id;
-            const impressions = Number(row.impressions || 0);
-            const clicks = Number(row.clicks || 0);
-            const spend = Number(row.spend || 0);
-            const schedulesData = extractSchedules(row);
-            const schedules = schedulesData.count;
-            // Use cost_per_result from API if available, otherwise calculate from spend
-            const costPerSchedule = schedulesData.costPerResult > 0 
-              ? schedulesData.costPerResult 
-              : (schedules > 0 ? spend / schedules : 0);
-            const conversionRate = schedulesData.conversionRate;
-            const conversionEvents = extractConversionEvents(row);
-
+        for (const row of rows) {
+          const adId = row.ad_id;
+          const impressions = Number(row.impressions || 0);
+          const clicks = Number(row.clicks || 0);
+          const spend = Number(row.spend || 0);
+          
+          // Extract schedule_website conversions from actions array
+          // The API returns actions with action_type breakdown when action_breakdowns=action_type
+          let schedules = 0;
+          let costPerSchedule = 0;
+          let conversionRate = 0;
+          
+          // Check actions array for schedule_website
+          if (Array.isArray(row.actions)) {
+            const scheduleAction = row.actions.find((a: any) => 
+              a.action_type === 'schedule_website' || 
+              (a.action_type && a.action_type.toLowerCase().includes('schedule'))
+            );
+            if (scheduleAction) {
+              schedules = Number(scheduleAction.value || 0);
+            }
+          }
+          
+          // Check conversions array (alternative format)
+          if (Array.isArray(row.conversions)) {
+            const scheduleConversion = row.conversions.find((c: any) => 
+              c.action_type === 'schedule_website' || 
+              (c.action_type && c.action_type.toLowerCase().includes('schedule'))
+            );
+            if (scheduleConversion) {
+              schedules = Number(scheduleConversion.value || schedules);
+            }
+          }
+          
+          // Get cost per action from cost_per_action_type
+          if (Array.isArray(row.cost_per_action_type)) {
+            const scheduleCost = row.cost_per_action_type.find((c: any) => 
+              c.action_type === 'schedule_website' || 
+              (c.action_type && c.action_type.toLowerCase().includes('schedule'))
+            );
+            if (scheduleCost) {
+              costPerSchedule = Number(scheduleCost.value || 0);
+            }
+          }
+          
+          // Calculate cost per schedule if not provided
+          if (costPerSchedule === 0 && schedules > 0 && spend > 0) {
+            costPerSchedule = spend / schedules;
+          }
+          
+          // Calculate conversion rate (schedules / clicks)
+          if (clicks > 0 && schedules > 0) {
+            conversionRate = (schedules / clicks) * 100;
+          }
+          
+          // Only include ads with schedules > 0
+          if (schedules > 0) {
             const accountIdNumeric = facebookAccount.accountId.startsWith('act_')
               ? facebookAccount.accountId.replace('act_', '')
               : facebookAccount.accountId;
@@ -334,8 +371,8 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
             results.push({
               combinationId: adId,
               facebookAdId: adId,
-              adsetId: row.adset_id,
-              campaignName: row.campaign_name || campaign.name,
+              adsetId: row.adset_id || '',
+              campaignName: row.campaign_name || '',
               adsetName: row.adset_name || '',
               adName: row.ad_name || '',
               impressions,
@@ -347,15 +384,13 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
               score: 0, // Will be calculated after all ads are collected
               url: '',
               facebookAdLink,
-              conversionEvents,
+              conversionEvents: extractConversionEvents(row),
             });
           }
-        } catch (error: any) {
-          console.error(
-            `[getWinningAds] Failed to fetch insights for campaign ${campaign.id}:`,
-            error
-          );
         }
+      } catch (error: any) {
+        console.error('[getWinningAds] Failed to fetch account insights:', error);
+        throw error;
       }
 
       // Upsert cache

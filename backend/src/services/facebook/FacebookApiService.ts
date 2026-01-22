@@ -181,6 +181,73 @@ export class FacebookApiService {
     }
   }
 
+  /**
+   * Get account-level insights for all ads with schedule_website conversions.
+   * Single API call for entire ad account to get ad-level data.
+   * Handles pagination automatically.
+   */
+  async getAccountAdInsights(
+    accountId: string,
+    dateRange: { since: string; until: string }
+  ): Promise<any[]> {
+    try {
+      const allResults: any[] = [];
+      let nextUrl: string | null = null;
+      let pageCount = 0;
+      const maxPages = 100; // Safety limit
+
+      do {
+        let response;
+        if (nextUrl) {
+          // For pagination, use axios directly with the full URL
+          // The next URL already contains the access token
+          response = await axios.get(nextUrl);
+        } else {
+          // First page - construct URL manually to match the exact working query format
+          // Note: accountId should already include 'act_' prefix
+          const baseUrl = `https://graph.facebook.com/${this.apiVersion}/${accountId}/insights`;
+          const params = new URLSearchParams({
+            fields: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,impressions,reach,spend,clicks,inline_link_clicks,actions,action_values,conversions,conversion_values,cost_per_action_type',
+            'time_range[since]': dateRange.since,
+            'time_range[until]': dateRange.until,
+            action_breakdowns: 'action_type',
+            action_type: 'schedule_website',
+            level: 'ad',
+            access_token: this.accessToken,
+          });
+          
+          const url = `${baseUrl}?${params.toString()}`;
+          response = await axios.get(url);
+        }
+
+        const data = response.data.data || [];
+        allResults.push(...data);
+
+        // Check for pagination
+        const paging: any = response.data.paging;
+        if (paging && paging.next) {
+          nextUrl = paging.next;
+          pageCount++;
+        } else {
+          nextUrl = null;
+        }
+
+        // Safety check to prevent infinite loops
+        if (pageCount >= maxPages) {
+          console.warn(`[getAccountAdInsights] Reached max pages limit (${maxPages}), stopping pagination`);
+          break;
+        }
+      } while (nextUrl);
+
+      return allResults;
+    } catch (error: any) {
+      const fbError = error.response?.data?.error;
+      const message =
+        fbError?.message || error.message || 'Failed to fetch account ad insights';
+      throw new Error(`Failed to fetch account ad insights: ${message}`);
+    }
+  }
+
   async getPages(): Promise<Array<{ id: string; name: string }>> {
     try {
       const response = await this.api.get('/me/accounts', {
