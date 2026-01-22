@@ -66,16 +66,28 @@ export class OpenAIService {
   }
 
   async generateHeadlines(
-    bodyCopy: string,
+    bodyCopy: string | string[],
     count: number = 10,
     typeDescription?: string
   ): Promise<string[]> {
-    const prompt = `Generate ${count} compelling Facebook ad headlines that complement this body copy. 
-Make them attention-grabbing, benefit-focused, and optimized for engagement.
+    // If bodyCopy is an array, join all body copies for context
+    const bodyCopiesText = Array.isArray(bodyCopy) 
+      ? bodyCopy.map((copy, idx) => `Body Copy ${idx + 1}:\n${copy}`).join('\n\n')
+      : bodyCopy;
+    
+    const prompt = `First, carefully review ALL the body copies below to understand the full context, key messages, and value propositions.
+
+${Array.isArray(bodyCopy) ? `ALL Body Copies:\n${bodyCopiesText}` : `Body Copy:\n${bodyCopiesText}`}
+
+Now generate ${count} compelling Facebook ad headlines/titles that:
+- Are clear, engaging, and simple - anyone can instantly understand them
+- Hook the reader immediately
+- Complement the body copy(s) above
+- SIMPLICITY IS KING - avoid complex language, jargon, or confusing phrases
+- Make them attention-grabbing, benefit-focused, and optimized for engagement
 ${typeDescription ? `\nTypes of headlines to generate: ${typeDescription}` : ''}
 
-Body Copy:
-${bodyCopy}
+Focus on clarity and instant comprehension. The best headlines are simple enough that anyone can understand them in 2 seconds.
 
 Return only the headlines, one per line, without numbering.`;
 
@@ -251,12 +263,20 @@ Return only the hooks, one per line, without numbering.`;
     switch (contentType) {
       case 'headline':
         systemPrompt = HORMOZI_BASE_PROMPT;
-        userPrompt = `Generate ONE new variant of this Facebook ad headline. Make it attention-grabbing, benefit-focused, and optimized for engagement. Keep it under 60 characters for best results.
+        userPrompt = `Generate ONE new variant of this Facebook ad headline. 
 
 Current Headline:
 ${currentContent}
 
 ${contextString ? `\nContext:\n${contextString}` : ''}
+
+Requirements:
+- Clear, engaging, and simple - anyone can instantly understand it
+- Hook the reader immediately
+- SIMPLICITY IS KING - avoid complex language, jargon, or confusing phrases
+- Attention-grabbing, benefit-focused, and optimized for engagement
+- Keep it under 60 characters for best results
+- Focus on clarity and instant comprehension
 
 Return only the new headline variant, without numbering or labels.`;
         break;
@@ -269,6 +289,29 @@ Current Body Copy:
 ${currentContent}
 
 ${contextString ? `\nContext:\n${contextString}` : ''}
+
+Use Hormozi's What? Who? When? framework to structure the copy:
+
+WHAT? - Use the 8 variables of the value equation:
+- Dream outcome (what they want) → Nightmare (what they're avoiding)
+- Time delay (how long it takes) → Speed (how fast it happens)
+- Perceived likelihood of achievement → Risk (what could go wrong)
+- Effort & Sacrifice → Ease (how simple it is)
+
+WHO? - Choose a perspective to communicate through:
+- The prospect themselves
+- Their spouse/partner
+- Their kids
+- Their boss
+- Colleagues
+- Friends
+
+WHEN? - Select a time period to frame the message:
+- Future phase (pain or pleasure they'll experience)
+- Past phase (pain or pleasure they've experienced)
+- Present phase (pain or pleasure they're experiencing now)
+
+Use this framework to describe the benefits of choosing the product/service and the cost of staying the same.
 
 Return only the new body copy variant, without numbering or labels.`;
         break;
@@ -328,12 +371,25 @@ Return only the new description variant, without numbering or labels.`;
       scrapedContent.valuePropositions.length > 0 ? `Value Propositions: ${scrapedContent.valuePropositions.join('; ')}` : '',
     ].filter(Boolean).join('\n\n');
 
-    const userPrompt = `Based on this landing page content, generate a compelling unique selling proposition (USP) or positioning angle for a Facebook ad campaign.
+    const userPrompt = `Based on this landing page content, generate ONE simple ad angle for a Facebook ad campaign.
 
 Landing Page Content:
 ${contentSummary}
 
-Generate a clear, compelling angle that highlights what makes this product/service unique and why customers should care. Focus on the key differentiator or value proposition. Keep it concise (2-4 sentences).
+Select ONE of these proven ad angles that best fits this product/service, then generate a concise angle using that framework:
+
+1. Value over Price → Make the outcome feel worth far more than the cost.
+2. Before vs After → Show the clear transformation from problem to result.
+3. Speed & Simplicity → Highlight how fast and easy it becomes.
+4. Proof over Claims → Use numbers and real results instead of promises.
+5. Anti-Status Quo → Call out the old way as broken or outdated.
+6. Authority / Scarcity → Position it as expert-led or limited access.
+7. Guarantee / Risk Removal → Remove fear by lowering or reversing risk.
+8. Future Pacing → Help them imagine life after the result.
+9. Niche Call-Out → Speak directly to a specific audience.
+10. Contrast Flow → Walk them from pain to solution to outcome.
+
+IMPORTANT: Generate ONLY ONE angle. Select the single best framework and create one clear, compelling angle (2-4 sentences) using that framework.
 
 Return only the angle/positioning text, without labels or numbering.`;
 
@@ -344,15 +400,23 @@ Return only the angle/positioning text, without labels or numbering.`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.7,
-        n: 1,
+        temperature: 0.2,
+        n: 1, // Generate only 1 response
+        max_tokens: 200, // Limit to ensure single angle (2-4 sentences)
       });
 
       const content = response.choices[0]?.message.content || '';
-      return content
+      // Extract only the first angle if multiple are returned
+      // Take first paragraph, remove numbered items, limit to ~4 sentences
+      let firstAngle = content.split('\n\n')[0]; // Take first paragraph
+      firstAngle = firstAngle.split('\n').find((line: string) => !line.match(/^\d+[\.\)]/)) || firstAngle; // Remove numbered items
+      firstAngle = firstAngle.split('. ').slice(0, 4).join('. '); // Limit to ~4 sentences max
+      
+      return firstAngle
         .trim()
         .replace(/^["']|["']$/g, '')
         .replace(/^(Angle|Positioning|USP):\s*/i, '')
+        .replace(/^\d+[\.\)]\s*/, '') // Remove leading numbers
         .trim();
     } catch (error: any) {
       throw new Error(`OpenAI API error: ${error.message}`);

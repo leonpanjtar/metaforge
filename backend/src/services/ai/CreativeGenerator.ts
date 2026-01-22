@@ -210,6 +210,7 @@ Analyze this image with extreme precision:
 2. MAIN SUBJECT (CORE STAYS, DETAILS CAN VARY):
    - Describe the person, product, or main focal point
    - CORE: Identity, pose, expression, positioning, what they're doing
+   - CRITICAL FOR HUMANS: If humans are present, their faces and bodies must remain EXACTLY as they are - preserve facial features, body shape, proportions, and poses
    - CAN VARY: Clothing style, colors, accessories, props (can add/change)
 
 3. TEXT ELEMENTS (MUST STAY IDENTICAL):
@@ -229,6 +230,7 @@ Analyze this image with extreme precision:
 5. WHAT MUST STAY THE SAME:
    - Core concept and message
    - Main subject identity and core appearance
+   - Human faces and bodies (if present): facial features, body shape, proportions, poses must remain EXACTLY as they are
    - All text content (exact words, numbers, symbols)
    - Overall composition structure
    - Product/service being shown
@@ -416,6 +418,7 @@ Return your analysis as JSON with these fields:
         prompt += `- Main subject: ${mainSubject}\n`;
         prompt += `  CORE (must stay): Identity, pose, expression, what they're doing\n`;
         prompt += `  CAN VARY: Clothing style, colors, accessories, props, effects\n`;
+        prompt += `  ⚠️ CRITICAL: If humans are present in the original image, their faces and bodies must remain EXACTLY as they are - do not change facial features, body shape, or proportions. Only clothing, colors, and accessories can vary.\n`;
         
         // Variation-specific instructions
         if (userInstructions) {
@@ -487,6 +490,7 @@ Return your analysis as JSON with these fields:
         prompt += `- Core concept and message: MUST STAY IDENTICAL\n`;
         prompt += `- All text content: MUST STAY EXACTLY THE SAME (words, numbers, symbols)\n`;
         prompt += `- Main subject identity: MUST STAY THE SAME (who/what, pose, expression, what they're doing)\n`;
+        prompt += `- HUMAN FACES AND BODIES: If humans are present in the original image, their faces and bodies must remain EXACTLY as they are - preserve facial features, body shape, proportions, and poses. Only clothing, colors, accessories, and styling can vary.\n`;
         prompt += `- CAN VARY: Visual style, colors, background, font style, effects, clothing, additional elements\n`;
         if (textStrings.length > 0) {
           prompt += `- Text to preserve exactly: ${textStrings.map((t: string) => `"${t}"`).join(', ')}\n`;
@@ -504,125 +508,31 @@ Return your analysis as JSON with these fields:
       for (let i = 0; i < variationPrompts.length; i++) {
         try {
           
-          // Use Responses API with gpt-image-1 model, with fallback to DALL-E 3
+          // Use Images API with gpt-image-1 model, with fallback to DALL-E 3
           let base64Image: string | null = null;
           let useDalle3Fallback = false;
           
           try {
-            // Try using responses API (for gpt-image-1) with image input
-            if ((this.getClient() as any).responses?.create) {
-              // Convert image buffer to base64 data URL for the API
-              const imageBase64 = imageBuffer.toString('base64');
-              const imageDataUrl = `data:image/png;base64,${imageBase64}`;
-              
-              // Create messages array with both image and text
-              const messages = [
-                {
-                  role: 'user',
-                  content: [
-                    {
-                      type: 'image_url',
-                      image_url: { url: imageDataUrl },
-                    },
-                    {
-                      type: 'text',
-                      text: variationPrompts[i],
-                    },
-                  ],
-                },
-              ];
-              
-              const response = await (this.getClient() as any).responses.create({
-                model: 'gpt-image-1',
-                messages: messages,
-                tools: [{ 
-                  type: 'image_generation',
-                }],
-                tool_choice: { type: 'image_generation' },
-              });
+            // Use images.edit() API directly - faster than Responses API
+            // Create a File object from the buffer (SDK expects File, not Buffer)
+            const imageFile = new File([imageBuffer], 'image.png', { type: 'image/png' });
+            const result = await this.getClient().images.edit({
+              model: 'gpt-image-1.5',
+              image: imageFile,
+              prompt: variationPrompts[i],
+            });
 
-              // Extract base64 images from the tool outputs
-              const imageOutputs = response.output
-                .filter((output: any) => output.type === 'image_generation_call')
-                .map((output: any) => output.result);
-
-              if (imageOutputs.length > 0 && imageOutputs[0]) {
-                base64Image = imageOutputs[0];
-              }
-            } else {
-              // Fallback: Use images.generate API directly (if responses API not available)
-              throw new Error('responses.create not available in SDK');
+            // Extract base64 from result
+            if (result.data && result.data[0] && result.data[0].b64_json) {
+              base64Image = result.data[0].b64_json;
+            } else if (result.data && result.data[0] && result.data[0].url) {
+              // If URL is returned instead, download it and convert to base64
+              const imageResponse = await axios.get(result.data[0].url, { responseType: 'arraybuffer' });
+              base64Image = Buffer.from(imageResponse.data).toString('base64');
             }
           } catch (apiError: any) {
-            // If responses API fails or doesn't exist, try direct HTTP call
-            try {
-              const axios = require('axios');
-              const apiKey = process.env.OPENAI_API_KEY;
-              
-              // Convert image buffer to base64 data URL
-              const imageBase64 = imageBuffer.toString('base64');
-              const imageDataUrl = `data:image/png;base64,${imageBase64}`;
-              
-              // Create messages array with both image and text
-              const messages = [
-                {
-                  role: 'user',
-                  content: [
-                    {
-                      type: 'image_url',
-                      image_url: { url: imageDataUrl },
-                    },
-                    {
-                      type: 'text',
-                      text: variationPrompts[i],
-                    },
-                  ],
-                },
-              ];
-              
-              const apiResponse = await axios.post(
-                'https://api.openai.com/v1/responses',
-                {
-                  model: 'gpt-image-1',
-                  messages: messages,
-                  tools: [{ type: 'image_generation' }],
-                  tool_choice: { type: 'image_generation' },
-                },
-                {
-                  headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                  },
-                }
-              );
-
-              const imageOutputs = apiResponse.data.output
-                .filter((output: any) => output.type === 'image_generation_call')
-                .map((output: any) => output.result);
-
-              if (imageOutputs.length > 0 && imageOutputs[0]) {
-                base64Image = imageOutputs[0];
-              }
-            } catch (httpError: any) {
-              const errorDetails = httpError.response?.data || httpError.message;
-              const errorStatus = httpError.response?.status;
-              
-              console.error('[CreativeGenerator] gpt-image-1 API error details:', {
-                status: errorStatus,
-                statusText: httpError.response?.statusText,
-                data: JSON.stringify(httpError.response?.data, null, 2),
-                message: httpError.message,
-                url: 'https://api.openai.com/v1/responses'
-              });
-              
-              // If 400/404 error or API not available, mark for DALL-E 3 fallback
-              if (errorStatus === 400 || errorStatus === 404 || errorStatus === 422) {
-                useDalle3Fallback = true;
-              } else {
-                // For other errors, still try DALL-E 3 as fallback
-                useDalle3Fallback = true;
-              }
-            }
+            console.error('[CreativeGenerator] gpt-image-1 API error:', apiError.message);
+            useDalle3Fallback = true;
           }
           
           // Fallback to DALL-E 3 if gpt-image-1 fails or is not available
@@ -656,7 +566,7 @@ Return your analysis as JSON with these fields:
                 base64Image = buffer.toString('base64');
               }
             } catch (dalleError: any) {
-              throw new Error(`Both gpt-image-1 and DALL-E 3 failed. DALL-E 3 error: ${dalleError.message}`);
+              throw new Error(`Both gpt-5 and DALL-E 3 failed. DALL-E 3 error: ${dalleError.message}`);
             }
           }
 

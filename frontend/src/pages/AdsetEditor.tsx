@@ -1878,10 +1878,11 @@ const AdsetEditor = () => {
               </div>
 
               {/* Generate Assets Section */}
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="bg-white rounded-lg shadow p-6 hidden">
                 <h2 className="text-xl font-semibold mb-4">Generate Assets</h2>
                 
-                {/* Text-to-Image Generation */}
+                {/* Text-to-Image Generation - HIDDEN */}
+                {false && (
                 <div className="mb-6 pb-6 border-b">
                   <h3 className="text-lg font-medium text-gray-900 mb-3">Generate from Prompt</h3>
                   <div className="space-y-3">
@@ -1938,6 +1939,7 @@ const AdsetEditor = () => {
                     </div>
                   </div>
                 </div>
+                )}
               </div>
 
               {/* All Assets Section */}
@@ -2548,7 +2550,7 @@ const AdsetEditor = () => {
                         className="mr-2"
                       />
                       <span className="text-sm">
-                        <strong>OpenAI gpt-image-1</strong> (Recommended)
+                        <strong>OpenAI gpt-image-1.5</strong> (Recommended)
                         <span className="block text-xs text-gray-500 mt-1">
                           High quality, preserves aspect ratio, clear readable text
                         </span>
@@ -2617,7 +2619,7 @@ const AdsetEditor = () => {
                 {variantProvider === 'openai' && (
                   <div className="bg-green-50 p-4 rounded-md border border-green-200">
                     <p className="text-sm text-green-800">
-                      <strong>OpenAI gpt-image-1 Features:</strong>
+                      <strong>OpenAI gpt-image-1.5 Features:</strong>
                       <ul className="list-disc list-inside mt-2 space-y-1">
                         <li>Analyzes your image automatically</li>
                         <li>Preserves original aspect ratio</li>
@@ -2645,7 +2647,7 @@ const AdsetEditor = () => {
                 >
                   {generatingForAsset === selectedAssetForVariants._id 
                     ? `Generating ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI' : 'Meta AI'}...` 
-                    : `Generate ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI gpt-image-1' : 'Meta AI'}`}
+                    : `Generate ${variantCount} Variant(s) with ${variantProvider === 'openai' ? 'OpenAI gpt-image-1.5' : 'Meta AI'}`}
                 </button>
 
                 {/* Progressive Loading UI */}

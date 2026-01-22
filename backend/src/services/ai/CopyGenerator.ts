@@ -46,18 +46,39 @@ ${landingPageText}
 ${context.targetAudience ? `Target Audience: ${context.targetAudience}\n` : ''}
 ${context.painPoints ? `Address these pain points: ${context.painPoints}\n` : ''}
 
-Generate direct response copy that drives action.`;
+Use Hormozi's What? Who? When? framework to structure the copy:
+
+WHAT? - Use the 8 variables of the value equation:
+- Dream outcome (what they want) → Nightmare (what they're avoiding)
+- Time delay (how long it takes) → Speed (how fast it happens)
+- Perceived likelihood of achievement → Risk (what could go wrong)
+- Effort & Sacrifice → Ease (how simple it is)
+
+WHO? - Choose a perspective to communicate through:
+- The prospect themselves
+- Their spouse/partner
+- Their kids
+- Their boss
+- Colleagues
+- Friends
+
+WHEN? - Select a time period to frame the message:
+- Future phase (pain or pleasure they'll experience)
+- Past phase (pain or pleasure they've experienced)
+- Present phase (pain or pleasure they're experiencing now)
+
+Use this framework to describe the benefits of choosing the product/service and the cost of staying the same. Generate direct response copy that drives action.`;
 
     const bodyCopies = await this.openAIService.generateCopy(bodyCopyPrompt, {
       ...context,
       landingPageContent: landingPageText,
     });
 
-    // Generate headlines/titles
+    // Generate headlines/titles - pass ALL body copies for context
     const titleCount = config?.titles?.count || 10;
     const titleTypeDesc = config?.titles?.description || '';
     const headlines = await this.openAIService.generateHeadlines(
-      bodyCopies[0] || '',
+      bodyCopies, // Pass all body copies, not just the first one
       titleCount,
       titleTypeDesc
     );
@@ -104,7 +125,7 @@ Generate direct response copy that drives action.`;
     const titleCount = config?.titles?.count || 10;
     const titleTypeDesc = config?.titles?.description || '';
     const headlines = await this.openAIService.generateHeadlines(
-      bodyCopies[0] || '',
+      bodyCopies, // Pass all body copies, not just the first one
       titleCount,
       titleTypeDesc
     );

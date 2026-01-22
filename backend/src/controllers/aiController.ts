@@ -380,7 +380,7 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
           let buffer: Buffer;
           let mimeType = 'image/png';
 
-          // Handle base64 data URL (from gpt-image-1) or regular URL (fallback)
+          // Handle base64 data URL (from gpt-image-1.5) or regular URL (fallback)
           if (imageData.startsWith('data:image/')) {
             const matches = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
             if (matches) {
