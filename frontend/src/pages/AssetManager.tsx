@@ -14,6 +14,9 @@ interface Asset {
     width?: number;
     height?: number;
     size?: number;
+    facebookVideoId?: string;
+    isVideoThumbnail?: boolean;
+    videoAssetId?: string; // Link thumbnail to video asset
   };
   createdAt?: string;
 }
@@ -334,14 +337,102 @@ const AssetManager = () => {
                         className="w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
                       />
                     ) : (
-                      <video
-                        src={`${API_URL}${asset.url}`}
-                        className="w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
-                        muted
-                        preload="metadata"
-                      >
-                        Your browser does not support the video tag.
-                      </video>
+                      (() => {
+                        // Find thumbnail for this video - try multiple matching strategies
+                        const videoThumbnail = assets?.find((a) => {
+                          if (a.type !== 'image' || !a.metadata?.isVideoThumbnail) return false;
+                          
+                          // Strategy 1: Match by videoAssetId (direct link) - most reliable
+                          if (a.metadata?.videoAssetId) {
+                            return a.metadata.videoAssetId === asset._id;
+                          }
+                          
+                          // Strategy 2: Match by facebookVideoId if both have it
+                          if (asset.metadata?.facebookVideoId && a.metadata?.facebookVideoId) {
+                            return a.metadata.facebookVideoId === asset.metadata.facebookVideoId;
+                          }
+                          
+                          // Strategy 3: Match by filename pattern (thumbnail filename might contain video filename or ID)
+                          const videoBaseName = asset.filename.replace(/\.[^/.]+$/, ''); // Remove extension
+                          const thumbnailName = a.filename.toLowerCase();
+                          if (thumbnailName.includes(videoBaseName.toLowerCase()) || 
+                              thumbnailName.includes(asset._id.toLowerCase()) ||
+                              thumbnailName.includes('thumbnail')) {
+                            // Additional check: make sure it's a recent thumbnail (within 1 hour of video creation)
+                            if (asset.createdAt && a.createdAt) {
+                              const timeDiff = Math.abs(new Date(asset.createdAt).getTime() - new Date(a.createdAt).getTime());
+                              return timeDiff < 3600000; // 1 hour
+                            }
+                            return true;
+                          }
+                          
+                          return false;
+                        });
+                        
+                        return videoThumbnail ? (
+                          <div className="relative w-full h-48">
+                            <img
+                              src={`${API_URL}${videoThumbnail.url}`}
+                              alt={`${asset.filename} thumbnail`}
+                              className="w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
+                              onError={(e) => {
+                                // Fallback to video if thumbnail fails to load
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const videoElement = target.parentElement?.querySelector('video') as HTMLVideoElement;
+                                if (videoElement) videoElement.style.display = 'block';
+                              }}
+                            />
+                            <div className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
+                              </svg>
+                              Video
+                            </div>
+                            {/* Hidden video element as fallback */}
+                            <video
+                              src={`${API_URL}${asset.url}`}
+                              className="hidden w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
+                              muted
+                              preload="metadata"
+                            >
+                              Your browser does not support the video tag.
+                            </video>
+                          </div>
+                        ) : (
+                          <div className="relative w-full h-48">
+                            <video
+                              src={`${API_URL}${asset.url}`}
+                              className="w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
+                              muted
+                              preload="metadata"
+                              onLoadedMetadata={(e) => {
+                                // Video loaded successfully - show first frame
+                                const video = e.target as HTMLVideoElement;
+                                video.currentTime = 0.1;
+                              }}
+                              onError={(e) => {
+                                // If video fails to load, show placeholder
+                                const video = e.target as HTMLVideoElement;
+                                video.style.display = 'none';
+                                const placeholder = video.parentElement?.querySelector('.video-placeholder') as HTMLElement;
+                                if (placeholder) placeholder.style.display = 'flex';
+                              }}
+                            >
+                              Your browser does not support the video tag.
+                            </video>
+                            <div className="video-placeholder hidden absolute inset-0 w-full h-48 bg-gray-200 rounded-lg items-center justify-center border-2 border-transparent" style={{ display: 'none' }}>
+                              <span className="text-gray-500 text-sm">Video</span>
+                            </div>
+                            <div className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
+                              </svg>
+                              Video
+                            </div>
+                          </div>
+                        );
+                      })()
                     )}
                     <div className="absolute top-0 left-0 right-0 bottom-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none">
                       <span className="opacity-0 group-hover:opacity-100 text-white text-sm">

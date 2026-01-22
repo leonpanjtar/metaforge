@@ -870,7 +870,7 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
           const filepath = path.join(uploadsDir, filename);
           await fs.writeFile(filepath, videoBuffer);
 
-          const asset = new Asset({
+          const videoAsset = new Asset({
             adsetId: newAdsetId,
             type: 'video',
             filename,
@@ -883,8 +883,42 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
               size: videoBuffer.length,
             },
           });
-          await asset.save();
-          importedAssetId = asset._id.toString();
+          await videoAsset.save();
+          importedAssetId = videoAsset._id.toString();
+          
+          // Also save the thumbnail image if available, linked to this video asset
+          if (imageUrl) {
+            try {
+              const imageResponse = await axios.get(imageUrl, {
+                responseType: 'arraybuffer',
+              });
+              const imageBuffer = Buffer.from(imageResponse.data);
+
+              const urlExtension = imageUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg';
+              const thumbnailFilename = `imported-${facebookAdId}-thumbnail-${Date.now()}.${urlExtension}`;
+              const uploadsDir = path.join(process.cwd(), 'uploads', newAdsetId);
+              await fs.mkdir(uploadsDir, { recursive: true });
+              const thumbnailFilepath = path.join(uploadsDir, thumbnailFilename);
+              await fs.writeFile(thumbnailFilepath, imageBuffer);
+
+              const thumbnailAsset = new Asset({
+                adsetId: newAdsetId,
+                type: 'image',
+                filename: thumbnailFilename,
+                filepath: thumbnailFilepath,
+                url: `/uploads/${newAdsetId}/${thumbnailFilename}`,
+                metadata: {
+                  facebookVideoId: videoId,
+                  isVideoThumbnail: true,
+                  videoAssetId: videoAsset._id.toString(), // Link to video asset
+                },
+              });
+              await thumbnailAsset.save();
+            } catch (thumbError: any) {
+              console.error('Failed to download video thumbnail:', thumbError);
+              // Continue without thumbnail
+            }
+          }
         }
       } catch (error: any) {
         console.error('Failed to download and save video:', error);
@@ -912,6 +946,7 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
               metadata: {
                 facebookVideoId: videoId,
                 isVideoThumbnail: true,
+                // Note: videoAssetId not set here since video download failed
               },
             });
             await asset.save();

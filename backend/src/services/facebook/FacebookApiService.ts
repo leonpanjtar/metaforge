@@ -610,48 +610,68 @@ export class FacebookApiService {
     },
     adFormat: string = 'MOBILE_FEED_STANDARD'
   ): Promise<any> {
+    let previewData: any;
     try {
-      const previewData: any = {
-        ad_format: adFormat,
-        creative: {
-          object_story_spec: creativeSpec.objectStorySpec,
-        },
+      // Build the creative object structure
+      const creativeObject: any = {
+        object_story_spec: creativeSpec.objectStorySpec,
       };
 
       // Add AI features if specified
       if (creativeSpec.aiFeatures) {
-        previewData.creative.degrees_of_freedom_spec = {
+        creativeObject.degrees_of_freedom_spec = {
           creative_features_spec: {},
         };
 
         if (creativeSpec.aiFeatures.textGeneration) {
-          previewData.creative.degrees_of_freedom_spec.creative_features_spec.text_generation = {
+          creativeObject.degrees_of_freedom_spec.creative_features_spec.text_generation = {
             enroll_status: 'OPT_IN',
           };
         }
 
         if (creativeSpec.aiFeatures.imageExpansion) {
-          previewData.creative.degrees_of_freedom_spec.creative_features_spec.image_uncrop = {
+          creativeObject.degrees_of_freedom_spec.creative_features_spec.image_uncrop = {
             enroll_status: 'OPT_IN',
           };
-          previewData.creative_feature = 'image_uncrop';
         }
 
         if (creativeSpec.aiFeatures.backgroundGeneration) {
-          previewData.creative.degrees_of_freedom_spec.creative_features_spec.image_background_gen = {
+          creativeObject.degrees_of_freedom_spec.creative_features_spec.image_background_gen = {
             enroll_status: 'OPT_IN',
           };
-          previewData.creative_feature = 'image_background_gen';
         }
       }
 
+      previewData = {
+        ad_format: adFormat,
+        creative: creativeObject,
+      };
+
+      // Facebook's generatepreviews API uses GET with query parameters
+      // For nested objects like creative, we need to JSON stringify them
+      const params: any = {
+        access_token: this.accessToken,
+        ad_format: adFormat,
+        creative: JSON.stringify(creativeObject),
+      };
+
       const response = await this.api.get(`/${accountId}/generatepreviews`, {
-        params: previewData,
+        params,
       });
       return response.data;
     } catch (error: any) {
+      const errorMessage = error.response?.data?.error?.message || error.response?.data?.error?.error_user_msg || error.message;
+      const errorType = error.response?.data?.error?.type || 'Unknown';
+      const errorCode = error.response?.data?.error?.code || 'N/A';
+      console.error('Facebook generatepreviews error details:', {
+        message: errorMessage,
+        type: errorType,
+        code: errorCode,
+        fullError: error.response?.data,
+        previewData: previewData ? JSON.stringify(previewData, null, 2) : 'Not initialized',
+      });
       throw new Error(
-        `Failed to generate AI previews: ${error.response?.data?.error?.message || error.message}`
+        `Failed to generate AI previews: ${errorMessage} (Type: ${errorType}, Code: ${errorCode})`
       );
     }
   }

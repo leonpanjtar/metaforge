@@ -9,6 +9,7 @@ export interface IAssetMetadata {
   facebookImageHash?: string;
   facebookVideoId?: string;
   isVideoThumbnail?: boolean;
+  videoAssetId?: string; // Link thumbnail to video asset by _id
 }
 
 export interface IAsset extends Document {
@@ -31,6 +32,7 @@ const AssetMetadataSchema = new Schema<IAssetMetadata>({
   facebookImageHash: String,
   facebookVideoId: String,
   isVideoThumbnail: Boolean,
+  videoAssetId: String, // Link thumbnail to video asset by _id
 });
 
 const AssetSchema = new Schema<IAsset>(

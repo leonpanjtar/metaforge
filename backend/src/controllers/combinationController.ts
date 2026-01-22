@@ -524,21 +524,78 @@ export const previewCombination = async (
         }
       }
 
+      // Facebook requires image_hash or image_url in video_data for video thumbnails
+      // Try to find a video thumbnail image asset first, then fall back to any image asset
+      let thumbnailImageHash: string | null = null;
+      
+      try {
+        // First, look for a video thumbnail image asset
+        const thumbnailAsset = await Asset.findOne({
+          adsetId: adset._id,
+          type: 'image',
+          'metadata.isVideoThumbnail': true,
+          'metadata.facebookVideoId': videoId || asset.metadata?.facebookVideoId,
+        });
+
+        if (thumbnailAsset?.metadata?.facebookImageHash) {
+          thumbnailImageHash = thumbnailAsset.metadata.facebookImageHash;
+        } else if (thumbnailAsset?.url) {
+          // Upload thumbnail to Facebook if not already uploaded
+          const thumbnailUrl = thumbnailAsset.url.startsWith('http')
+            ? thumbnailAsset.url
+            : `${PUBLIC_BASE_URL}${thumbnailAsset.url}`;
+          thumbnailImageHash = await facebookApi.uploadAdImage(adAccountId, thumbnailUrl);
+          // Save hash to thumbnail asset
+          thumbnailAsset.metadata = thumbnailAsset.metadata || {};
+          thumbnailAsset.metadata.facebookImageHash = thumbnailImageHash;
+          await thumbnailAsset.save();
+        } else {
+          // Fall back to any image asset in the adset
+          const fallbackImage = await Asset.findOne({
+            adsetId: adset._id,
+            type: 'image',
+          });
+
+          if (fallbackImage?.metadata?.facebookImageHash) {
+            thumbnailImageHash = fallbackImage.metadata.facebookImageHash;
+          } else if (fallbackImage?.url) {
+            const imageUrl = fallbackImage.url.startsWith('http')
+              ? fallbackImage.url
+              : `${PUBLIC_BASE_URL}${fallbackImage.url}`;
+            thumbnailImageHash = await facebookApi.uploadAdImage(adAccountId, imageUrl);
+            // Save hash to image asset
+            fallbackImage.metadata = fallbackImage.metadata || {};
+            fallbackImage.metadata.facebookImageHash = thumbnailImageHash;
+            await fallbackImage.save();
+          }
+        }
+      } catch (error: any) {
+        console.warn('Failed to get video thumbnail image:', error.message);
+        // Continue without thumbnail - Facebook might generate one automatically
+      }
+
+      const videoData: any = {
+        video_id: videoId || '',
+        message: adBody,
+        title: headline?.content || '',
+        link_description: description?.content || '',
+        call_to_action: {
+          type: ctaType,
+          value: {
+            link: landingPageUrl,
+          },
+        },
+      };
+
+      // Add thumbnail if we have one (required by Facebook)
+      if (thumbnailImageHash) {
+        videoData.image_hash = thumbnailImageHash;
+      }
+
       creativeSpec = {
         objectStorySpec: {
           page_id: pageId,
-          video_data: {
-            video_id: videoId || '',
-            message: adBody,
-            title: headline?.content || '',
-            link_description: description?.content || '',
-            call_to_action: {
-              type: ctaType,
-              value: {
-                link: landingPageUrl,
-              },
-            },
-          },
+          video_data: videoData,
         },
         pageId: pageId,
       };

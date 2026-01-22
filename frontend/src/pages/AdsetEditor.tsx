@@ -31,7 +31,11 @@ interface Asset {
     height?: number;
     size?: number;
     facebookImageHash?: string;
+    facebookVideoId?: string;
+    isVideoThumbnail?: boolean;
+    videoAssetId?: string; // Link thumbnail to video asset
   };
+  createdAt?: string;
 }
 
 interface AdCopy {
@@ -1128,18 +1132,44 @@ const AdsetEditor = () => {
   const handlePreviewCombination = async (combination: Combination) => {
     setPreviewingCombination(combination);
     setLoadingPreview(true);
+    setPreviewHtml(''); // Clear previous preview
     try {
       const response = await api.get(`/combinations/preview/${adsetId}/${combination._id}`);
-      // Preview HTML is in response.data.previews
-      if (response.data.previews && response.data.previews.length > 0) {
-        const preview = response.data.previews[0];
-        setPreviewHtml(preview.body || preview.html || '');
+      
+      // Facebook's generatepreviews API returns data in different formats
+      // Check for the most common structure: previews.data[0].body
+      let previewHtml = '';
+      
+      if (response.data.previews) {
+        const previews = response.data.previews;
+        
+        // Try to extract HTML from various possible structures
+        if (previews.data && Array.isArray(previews.data) && previews.data.length > 0) {
+          // Structure: { data: [{ body: '...' }] }
+          previewHtml = previews.data[0].body || previews.data[0].html || '';
+        } else if (Array.isArray(previews) && previews.length > 0) {
+          // Structure: [{ body: '...' }]
+          previewHtml = previews[0].body || previews[0].html || '';
+        } else if (previews.body) {
+          // Structure: { body: '...' }
+          previewHtml = previews.body;
+        } else if (previews.html) {
+          // Structure: { html: '...' }
+          previewHtml = previews.html;
+        } else if (typeof previews === 'string') {
+          // Direct HTML string
+          previewHtml = previews;
+        }
+      }
+      
+      if (previewHtml) {
+        setPreviewHtml(previewHtml);
       } else {
-        setPreviewHtml('<p>Preview not available</p>');
+        setPreviewHtml('<div style="padding: 20px; text-align: center;"><p>Preview HTML not available. The preview may need to be generated in Facebook Ads Manager.</p></div>');
       }
     } catch (error: any) {
       console.error('Preview error:', error);
-      setPreviewHtml(`<p>Error loading preview: ${error.response?.data?.error || error.message}</p>`);
+      setPreviewHtml(`<div style="padding: 20px; text-align: center;"><p style="color: red;">Error loading preview: ${error.response?.data?.error || error.message}</p></div>`);
     } finally {
       setLoadingPreview(false);
     }
@@ -1966,9 +1996,63 @@ const AdsetEditor = () => {
                               className="w-full h-32 object-cover rounded-lg border-2 border-gray-200 group-hover:border-blue-500 transition-all"
                             />
                           ) : (
-                            <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-gray-200">
-                              <span className="text-gray-500 text-sm">Video</span>
-                            </div>
+                            (() => {
+                              // Find thumbnail for this video - try multiple matching strategies
+                              const videoThumbnail = assets?.find((a) => {
+                                if (a.type !== 'image' || !a.metadata?.isVideoThumbnail) return false;
+                                
+                                // Strategy 1: Match by videoAssetId (direct link) - most reliable
+                                if (a.metadata?.videoAssetId) {
+                                  return a.metadata.videoAssetId === asset._id;
+                                }
+                                
+                                // Strategy 2: Match by facebookVideoId if both have it
+                                if (asset.metadata?.facebookVideoId && a.metadata?.facebookVideoId) {
+                                  return a.metadata.facebookVideoId === asset.metadata.facebookVideoId;
+                                }
+                                
+                                // Strategy 3: Match by filename pattern
+                                const videoBaseName = asset.filename.replace(/\.[^/.]+$/, '');
+                                const thumbnailName = a.filename.toLowerCase();
+                                if (thumbnailName.includes(videoBaseName.toLowerCase()) || 
+                                    thumbnailName.includes(asset._id.toLowerCase()) ||
+                                    thumbnailName.includes('thumbnail')) {
+                                  if (asset.createdAt && a.createdAt) {
+                                    const timeDiff = Math.abs(new Date(asset.createdAt).getTime() - new Date(a.createdAt).getTime());
+                                    return timeDiff < 3600000; // 1 hour
+                                  }
+                                  return true;
+                                }
+                                
+                                return false;
+                              });
+                              
+                              return videoThumbnail ? (
+                                <div className="relative w-full h-32">
+                                  <img
+                                    src={`${API_URL}${videoThumbnail.url}`}
+                                    alt={`${asset.filename} thumbnail`}
+                                    className="w-full h-32 object-cover rounded-lg border-2 border-gray-200 group-hover:border-blue-500 transition-all"
+                                  />
+                                  <div className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
+                                    </svg>
+                                    Video
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-gray-200 relative">
+                                  <span className="text-gray-500 text-sm">Video</span>
+                                  <div className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
+                                    </svg>
+                                    Video
+                                  </div>
+                                </div>
+                              );
+                            })()
                           )}
                           <div className="absolute top-0 left-0 right-0 bottom-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity rounded-lg flex items-center justify-center">
                             <span className="opacity-0 group-hover:opacity-100 text-white text-xs">Click to preview</span>
@@ -2793,6 +2877,75 @@ const AdsetEditor = () => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Preview Combination Modal */}
+      {previewingCombination && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            setPreviewingCombination(null);
+            setPreviewHtml('');
+          }}
+        >
+          <div
+            className="bg-white rounded-lg max-w-6xl w-full relative flex flex-col"
+            style={{ maxHeight: '90vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-xl font-bold text-gray-900">
+                Preview: {previewingCombination.headlineId?.content || 'Ad Preview'}
+              </h2>
+              <button
+                onClick={() => {
+                  setPreviewingCombination(null);
+                  setPreviewHtml('');
+                }}
+                className="p-2 bg-gray-600 text-white rounded-full hover:bg-gray-700 flex items-center justify-center"
+                aria-label="Close preview"
+                title="Close"
+              >
+                <HiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 bg-gray-100">
+              {loadingPreview ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading preview...</p>
+                  </div>
+                </div>
+              ) : previewHtml ? (
+                <div className="w-full flex justify-center">
+                  <div 
+                    className="border rounded-lg overflow-hidden bg-white shadow-lg"
+                    style={{ 
+                      width: '375px', // Mobile feed width
+                      minHeight: '500px',
+                    }}
+                  >
+                    <iframe
+                      srcDoc={previewHtml}
+                      className="w-full"
+                      style={{ 
+                        height: '600px',
+                        border: 'none',
+                      }}
+                      title="Facebook Ad Preview"
+                      sandbox="allow-same-origin allow-scripts"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-64">
+                  <p className="text-gray-600">Preview not available</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
