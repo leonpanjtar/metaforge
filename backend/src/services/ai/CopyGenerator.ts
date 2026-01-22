@@ -17,17 +17,13 @@ export class CopyGenerator {
     },
     config?: {
       bodies?: { count: number; description?: string };
-      ctas?: { count: number; description?: string };
-      hooks?: { count: number; description?: string };
       titles?: { count: number; description?: string };
       descriptions?: { count: number; description?: string };
     }
   ): Promise<{
     headlines: string[];
-    hooks: string[];
     bodyCopies: string[];
     descriptions: string[];
-    ctas: string[];
   }> {
     const landingPageText = [
       scrapedContent.title,
@@ -66,18 +62,6 @@ Generate direct response copy that drives action.`;
       titleTypeDesc
     );
 
-    // Generate hooks (treated as headlines but with different style)
-    const hookCount = config?.hooks?.count || 0;
-    let hooks: string[] = [];
-    if (hookCount > 0) {
-      const hookTypeDesc = config?.hooks?.description || '';
-      hooks = await this.openAIService.generateHooks(
-        bodyCopies[0] || '',
-        hookCount,
-        hookTypeDesc
-      );
-    }
-
     // Generate descriptions
     const descCount = config?.descriptions?.count || 5;
     const descTypeDesc = config?.descriptions?.description || '';
@@ -88,17 +72,10 @@ Generate direct response copy that drives action.`;
       descTypeDesc
     );
 
-    // Generate CTAs
-    const ctaCount = config?.ctas?.count || 5;
-    const ctaTypeDesc = config?.ctas?.description || '';
-    const ctas = await this.openAIService.suggestCTAs('conversion', undefined, ctaCount, ctaTypeDesc);
-
     return {
       headlines,
-      hooks,
       bodyCopies,
       descriptions,
-      ctas,
     };
   }
 
@@ -111,17 +88,13 @@ Generate direct response copy that drives action.`;
     },
     config?: {
       bodies?: { count: number; description?: string };
-      ctas?: { count: number; description?: string };
-      hooks?: { count: number; description?: string };
       titles?: { count: number; description?: string };
       descriptions?: { count: number; description?: string };
     }
   ): Promise<{
     headlines: string[];
-    hooks: string[];
     bodyCopies: string[];
     descriptions: string[];
-    ctas: string[];
   }> {
     const bodyCount = config?.bodies?.count || 10;
     const bodyTypeDesc = config?.bodies?.description || '';
@@ -136,17 +109,6 @@ Generate direct response copy that drives action.`;
       titleTypeDesc
     );
 
-    const hookCount = config?.hooks?.count || 0;
-    let hooks: string[] = [];
-    if (hookCount > 0) {
-      const hookTypeDesc = config?.hooks?.description || '';
-      hooks = await this.openAIService.generateHooks(
-        bodyCopies[0] || '',
-        hookCount,
-        hookTypeDesc
-      );
-    }
-
     const descCount = config?.descriptions?.count || 5;
     const descTypeDesc = config?.descriptions?.description || '';
     const descriptions = await this.openAIService.generateDescriptions(
@@ -156,16 +118,10 @@ Generate direct response copy that drives action.`;
       descTypeDesc
     );
 
-    const ctaCount = config?.ctas?.count || 5;
-    const ctaTypeDesc = config?.ctas?.description || '';
-    const ctas = await this.openAIService.suggestCTAs('conversion', undefined, ctaCount, ctaTypeDesc);
-
     return {
       headlines,
-      hooks,
       bodyCopies,
       descriptions,
-      ctas,
     };
   }
 }

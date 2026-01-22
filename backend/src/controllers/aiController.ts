@@ -1139,52 +1139,14 @@ export const generateCopy = async (req: AuthRequest, res: Response): Promise<voi
       savedCopies.push(copy);
     }
 
-    // Save hooks separately
-    const hooks = generatedCopy.hooks || [];
-    for (let i = 0; i < hooks.length; i++) {
-      const copy = new AdCopy({
-        adsetId,
-        type: 'hook',
-        content: hooks[i],
-        variantIndex: i,
-        generatedByAI: true,
-        aiPrompt: prompt || 'Generated from landing page',
-      });
-      await copy.save();
-      savedCopies.push(copy);
-    }
-
-    // Save body copies (with CTAs appended if configured)
+    // Save body copies
     const bodyCopies = generatedCopy.bodyCopies || [];
-    const ctas = generatedCopy.ctas || [];
     
     for (let i = 0; i < bodyCopies.length; i++) {
-      let bodyContent = bodyCopies[i];
-      
-      // Append CTA to body if configured
-      if (ctas.length > 0 && config?.ctas?.count > 0) {
-        const ctaIndex = i % ctas.length;
-        bodyContent = `${bodyContent}\n\n${ctas[ctaIndex]}`;
-      }
-      
       const copy = new AdCopy({
         adsetId,
         type: 'body',
-        content: bodyContent,
-        variantIndex: i,
-        generatedByAI: true,
-        aiPrompt: prompt || 'Generated from landing page',
-      });
-      await copy.save();
-      savedCopies.push(copy);
-    }
-
-    // Always save CTAs separately (in addition to appending to bodies if configured)
-    for (let i = 0; i < ctas.length; i++) {
-      const copy = new AdCopy({
-        adsetId,
-        type: 'cta',
-        content: ctas[i],
+        content: bodyCopies[i],
         variantIndex: i,
         generatedByAI: true,
         aiPrompt: prompt || 'Generated from landing page',
@@ -1209,15 +1171,182 @@ export const generateCopy = async (req: AuthRequest, res: Response): Promise<voi
 
     res.json({
       headlines: generatedCopy.headlines || [],
-      hooks: generatedCopy.hooks || [],
       bodyCopies: generatedCopy.bodyCopies || [],
       descriptions: generatedCopy.descriptions || [],
-      ctas: generatedCopy.ctas || [],
       savedCopies,
     });
   } catch (error: any) {
     console.error('Generate copy error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate copy' });
+  }
+};
+
+export const generateContentVariant = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { adsetId, copyId, contentType, currentContent } = req.body;
+
+    if (!adsetId || !copyId || !contentType || !currentContent) {
+      res.status(400).json({ error: 'adsetId, copyId, contentType, and currentContent are required' });
+      return;
+    }
+
+    if (!['headline', 'body', 'description'].includes(contentType)) {
+      res.status(400).json({ error: 'contentType must be headline, body, or description' });
+      return;
+    }
+
+    // Get adset to access contentData
+    const { Adset } = await import('../models/Adset');
+    const { getAccountFilter } = await import('../utils/accountFilter');
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    if (accountFilter.accountId) {
+      query.accountId = accountFilter.accountId;
+    } else {
+      query.userId = accountFilter.userId;
+    }
+
+    const adset = await Adset.findOne(query);
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    // Get contentData context
+    const contentData = (adset as any).contentData || {};
+    const context = {
+      landingPageUrl: contentData.landingPageUrl || '',
+      angle: contentData.angle || '',
+      keywords: contentData.keywords || [],
+      importantThings: contentData.importantThings || '',
+    };
+
+    // Verify the original copy exists and belongs to the adset
+    const originalCopy = await AdCopy.findById(copyId);
+    if (!originalCopy) {
+      res.status(404).json({ error: 'Copy not found' });
+      return;
+    }
+
+    // Verify copy belongs to the adset
+    if (originalCopy.adsetId.toString() !== adsetId) {
+      res.status(403).json({ error: 'Copy does not belong to this adset' });
+      return;
+    }
+
+    // Generate variant using OpenAI
+    const { OpenAIService } = await import('../services/ai/OpenAIService');
+    const openAIService = new OpenAIService();
+    const variant = await openAIService.generateContentVariant(
+      currentContent,
+      contentType as 'headline' | 'body' | 'description',
+      context
+    );
+
+    // Find the highest variantIndex for this type in the adset
+    const existingCopies = await AdCopy.find({
+      adsetId: adsetId,
+      type: contentType,
+    }).sort({ variantIndex: -1 }).limit(1);
+
+    const nextVariantIndex = existingCopies.length > 0 
+      ? existingCopies[0].variantIndex + 1 
+      : 0;
+
+    // Create a new copy entry with the generated variant
+    const newCopy = new AdCopy({
+      adsetId: adsetId,
+      type: contentType as 'headline' | 'body' | 'description',
+      content: variant,
+      variantIndex: nextVariantIndex,
+      generatedByAI: true,
+    });
+
+    await newCopy.save();
+
+    res.json({
+      success: true,
+      variant,
+      copy: {
+        _id: newCopy._id,
+        content: newCopy.content,
+        type: newCopy.type,
+        variantIndex: newCopy.variantIndex,
+        generatedByAI: newCopy.generatedByAI,
+      },
+    });
+  } catch (error: any) {
+    console.error('Generate content variant error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate content variant' });
+  }
+};
+
+export const generateContentData = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { adsetId, url, field } = req.body;
+
+    if (!adsetId || !url || !field) {
+      res.status(400).json({ error: 'adsetId, url, and field are required' });
+      return;
+    }
+
+    if (!['angle', 'keywords', 'importantThings'].includes(field)) {
+      res.status(400).json({ error: 'field must be angle, keywords, or importantThings' });
+      return;
+    }
+
+    // Verify adset exists
+    const { Adset } = await import('../models/Adset');
+    const { getAccountFilter } = await import('../utils/accountFilter');
+    const accountFilter = await getAccountFilter(req);
+    
+    const query: any = { _id: adsetId };
+    if (accountFilter.accountId) {
+      query.accountId = accountFilter.accountId;
+    } else {
+      query.userId = accountFilter.userId;
+    }
+
+    const adset = await Adset.findOne(query);
+    if (!adset) {
+      res.status(404).json({ error: 'Adset not found' });
+      return;
+    }
+
+    // Scrape the landing page
+    const scrapedContent = await getLandingPageScraper().scrape(url);
+
+    // Generate the requested field using OpenAI
+    const { OpenAIService } = await import('../services/ai/OpenAIService');
+    const openAIService = new OpenAIService();
+
+    let result: any = {};
+
+    switch (field) {
+      case 'angle':
+        const angle = await openAIService.generateAngle(scrapedContent);
+        result = { angle };
+        break;
+
+      case 'keywords':
+        const keywords = await openAIService.generateKeywords(scrapedContent);
+        result = { keywords };
+        break;
+
+      case 'importantThings':
+        const importantThings = await openAIService.generateImportantThings(scrapedContent);
+        result = { importantThings };
+        break;
+    }
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error('Generate content data error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate content data' });
   }
 };
 

@@ -5,7 +5,7 @@ import api from '../services/api';
 
 interface AdCopy {
   _id: string;
-  type: 'headline' | 'body' | 'description' | 'cta';
+  type: 'headline' | 'body' | 'description';
   content: string;
   variantIndex: number;
   generatedByAI: boolean;
@@ -249,7 +249,7 @@ const CopyGenerator = () => {
 
         {copies && copies.length > 0 && (
           <div className="space-y-6">
-            {(['headline', 'body', 'description', 'cta'] as const).map((type) => {
+            {(['headline', 'body', 'description'] as const).map((type) => {
               const typeCopies = groupedCopies[type] || [];
               if (typeCopies.length === 0) return null;
 

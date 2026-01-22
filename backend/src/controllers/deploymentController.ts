@@ -223,7 +223,6 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
         const combination = await AdCombination.findById(combinationId)
           .populate('assetIds')
           .populate('headlineId')
-          .populate('hookId')
           .populate('bodyId')
           .populate('descriptionId')
           .populate('ctaId');
@@ -248,73 +247,112 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           ? combination.assetIds[0] as any
           : null;
 
-        if (!asset || asset.type !== 'image') {
-          errors.push({ combinationId, error: 'Combination must have at least one image asset' });
+        if (!asset || (asset.type !== 'image' && asset.type !== 'video')) {
+          errors.push({ combinationId, error: 'Combination must have at least one image or video asset' });
           continue;
         }
 
-        // Upload image to get hash
-        const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.API_URL || 'http://localhost:3001';
-        let imageHash = asset.metadata?.facebookImageHash;
-        
-        if (!imageHash) {
-          try {
-            const imageUrl = asset.url.startsWith('http') 
-              ? asset.url 
-              : `${PUBLIC_BASE_URL}${asset.url}`;
-            imageHash = await apiService.uploadAdImage(
-              accountIdWithPrefix,
-              imageUrl
-            );
-            // Save hash to asset metadata for future use
-            asset.metadata = asset.metadata || {};
-            asset.metadata.facebookImageHash = imageHash;
-            await asset.save();
-          } catch (error: any) {
-            console.error(`Failed to upload image for combination ${combinationId}:`, error);
-            errors.push({ 
-              combinationId, 
-              error: `Failed to upload image: ${error.message || 'Unknown error'}` 
-            });
-            continue;
-          }
-        }
-
-        // Build ad body: hook + body + CTA (with empty lines)
-        let adBody = '';
-        const hook = combination.hookId as any;
+        // Build ad body
         const body = combination.bodyId as any;
-        const cta = combination.ctaId as any;
-        
-        if (hook?.content) {
-          adBody += hook.content + '\n\n';
-        }
-        if (body?.content) {
-          adBody += body.content;
-        }
-        if (cta?.content) {
-          adBody += '\n\n' + cta.content;
-        }
+        const adBody = body?.content || '';
 
         // Get CTA type from combination
         const ctaType = combination.ctaType || 'LEARN_MORE';
 
-        // Build creative spec (object_story_spec) used for the ad creative
-        const creativeSpec = {
-          object_story_spec: {
-            page_id: pageId,
-            link_data: {
-              image_hash: imageHash,
-              link: landingPageUrl,
-              message: adBody,
-              name: (combination.headlineId as any)?.content || '',
-              description: (combination.descriptionId as any)?.content || '',
-              call_to_action: {
-                type: ctaType,
+        const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.API_URL || 'http://localhost:3001';
+        
+        // Build creative spec based on asset type
+        let creativeSpec: any;
+
+        if (asset.type === 'video') {
+          // Handle video asset
+          let videoId = asset.metadata?.facebookVideoId;
+          
+          if (!videoId) {
+            try {
+              const videoUrl = asset.url.startsWith('http') 
+                ? asset.url 
+                : `${PUBLIC_BASE_URL}${asset.url}`;
+              videoId = await apiService.uploadAdVideo(
+                accountIdWithPrefix,
+                videoUrl
+              );
+              // Save video ID to asset metadata for future use
+              asset.metadata = asset.metadata || {};
+              asset.metadata.facebookVideoId = videoId;
+              await asset.save();
+            } catch (error: any) {
+              console.error(`Failed to upload video for combination ${combinationId}:`, error);
+              errors.push({ 
+                combinationId, 
+                error: `Failed to upload video: ${error.message || 'Unknown error'}` 
+              });
+              continue;
+            }
+          }
+
+          // Build video_data creative spec
+          creativeSpec = {
+            object_story_spec: {
+              page_id: pageId,
+              video_data: {
+                video_id: videoId,
+                message: adBody,
+                title: (combination.headlineId as any)?.content || '',
+                link_description: (combination.descriptionId as any)?.content || '',
+                call_to_action: {
+                  type: ctaType,
+                  value: {
+                    link: landingPageUrl,
+                  },
+                },
               },
             },
-          },
-        };
+          };
+        } else {
+          // Handle image asset
+          let imageHash = asset.metadata?.facebookImageHash;
+          
+          if (!imageHash) {
+            try {
+              const imageUrl = asset.url.startsWith('http') 
+                ? asset.url 
+                : `${PUBLIC_BASE_URL}${asset.url}`;
+              imageHash = await apiService.uploadAdImage(
+                accountIdWithPrefix,
+                imageUrl
+              );
+              // Save hash to asset metadata for future use
+              asset.metadata = asset.metadata || {};
+              asset.metadata.facebookImageHash = imageHash;
+              await asset.save();
+            } catch (error: any) {
+              console.error(`Failed to upload image for combination ${combinationId}:`, error);
+              errors.push({ 
+                combinationId, 
+                error: `Failed to upload image: ${error.message || 'Unknown error'}` 
+              });
+              continue;
+            }
+          }
+
+          // Build link_data creative spec
+          creativeSpec = {
+            object_story_spec: {
+              page_id: pageId,
+              link_data: {
+                image_hash: imageHash,
+                link: landingPageUrl,
+                message: adBody,
+                name: (combination.headlineId as any)?.content || '',
+                description: (combination.descriptionId as any)?.content || '',
+                call_to_action: {
+                  type: ctaType,
+                },
+              },
+            },
+          };
+        }
 
         // Step 1: Create Ad Creative (act_{accountId}/adcreatives)
         const creativePayload = {

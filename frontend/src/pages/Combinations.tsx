@@ -10,9 +10,7 @@ interface Combination {
   headlineId: { content: string };
   bodyId: { content: string };
   descriptionId: { content: string };
-  ctaId: { content: string };
   scores: {
-    hook: number;
     alignment: number;
     fit: number;
     clarity: number;
@@ -169,7 +167,7 @@ const Combinations = () => {
                       </p>
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium">
-                          CTA: {combination.ctaId?.content}
+                          CTA Button: {combination.ctaType || 'LEARN_MORE'}
                         </span>
                         <span
                           className={`px-2 py-1 rounded text-xs font-semibold ${getScoreColor(
@@ -182,8 +180,7 @@ const Combinations = () => {
                       <div className="text-xs text-gray-500">
                         Predicted CTR: {combination.predictedCTR}%
                       </div>
-                      <div className="grid grid-cols-5 gap-1 text-xs">
-                        <div>H:{combination.scores.hook}</div>
+                      <div className="grid grid-cols-4 gap-1 text-xs">
                         <div>A:{combination.scores.alignment}</div>
                         <div>F:{combination.scores.fit}</div>
                         <div>C:{combination.scores.clarity}</div>

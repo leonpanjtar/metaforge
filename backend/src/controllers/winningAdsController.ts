@@ -703,19 +703,105 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       return;
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
-
-    // Get ad details and creative
-    const adDetails = await apiService.getAdDetails(facebookAdId);
-    const creativeId = adDetails.creative?.id;
-    if (!creativeId) {
-      res.status(400).json({ error: 'Creative ID not found' });
+    // Check and refresh token if needed
+    const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
+    await TokenRefreshService.checkAndRefreshToken(facebookAccount);
+    const updatedAccount = await FacebookAccount.findById(facebookAccount._id);
+    if (!updatedAccount) {
+      res.status(404).json({ error: 'Facebook account not found' });
       return;
     }
 
-    const creativeDetails = await apiService.getAdCreativeDetails(creativeId);
-    const linkData = creativeDetails.object_story_spec?.link_data || {};
+    const apiService = new FacebookApiService(updatedAccount.accessToken);
+
+    // Get ad details directly from Facebook API (same as getAdDetails)
+    const adDetails = await apiService.getAdDetails(facebookAdId);
     const adsetDetails = await apiService.getAdsetDetails(adDetails.adset_id);
+
+    // Initialize creative data with defaults (same logic as getAdDetails)
+    let headline = '';
+    let body = '';
+    let description = '';
+    let ctaButton = 'LEARN_MORE';
+    let imageHash: string | null = null;
+    let imageUrl: string | null = null;
+    let videoId: string | null = null;
+    let videoUrl: string | null = null;
+    let link = '';
+    let isVideo = false;
+
+    // Extract data from object_story_spec (same as getAdDetails)
+    const objectStorySpec = adDetails.creative?.object_story_spec;
+    
+    if (objectStorySpec) {
+      const linkData = objectStorySpec.link_data || {};
+      const videoData = objectStorySpec.video_data || {};
+      
+      // Link ad format
+      if (linkData && Object.keys(linkData).length > 0) {
+        headline = linkData.name || '';
+        body = linkData.message || '';
+        description = linkData.description || '';
+        link = linkData.link || '';
+        if (linkData.image_hash) imageHash = linkData.image_hash;
+        if (linkData.call_to_action?.type) ctaButton = linkData.call_to_action.type;
+      }
+      
+      // Video ad format
+      if (videoData && Object.keys(videoData).length > 0) {
+        isVideo = true;
+        headline = videoData.title || videoData.name || '';
+        body = videoData.message || '';
+        description = videoData.description || '';
+        link = videoData.call_to_action?.value?.link || '';
+        if (videoData.image_url) imageUrl = videoData.image_url;
+        if (videoData.image_hash) imageHash = videoData.image_hash;
+        if (videoData.video_id) videoId = videoData.video_id;
+        if (videoData.call_to_action?.type) ctaButton = videoData.call_to_action.type;
+      }
+    } else {
+      // Fallback: try to fetch creative details if object_story_spec is not in ad details
+      const creativeId = adDetails.creative?.id;
+      if (creativeId) {
+        try {
+          const creativeDetails = await apiService.getAdCreativeDetails(creativeId);
+          
+          const fallbackObjectStorySpec = creativeDetails.object_story_spec;
+          if (fallbackObjectStorySpec) {
+            const linkData = fallbackObjectStorySpec.link_data || {};
+            const videoData = fallbackObjectStorySpec.video_data || {};
+            
+            if (linkData && Object.keys(linkData).length > 0) {
+              headline = linkData.name || '';
+              body = linkData.message || '';
+              description = linkData.description || '';
+              link = linkData.link || '';
+              if (linkData.image_hash) imageHash = linkData.image_hash;
+              if (linkData.call_to_action?.type) ctaButton = linkData.call_to_action.type;
+            }
+            
+            if (videoData && Object.keys(videoData).length > 0) {
+              isVideo = true;
+              headline = videoData.title || videoData.name || '';
+              body = videoData.message || '';
+              description = videoData.description || '';
+              link = videoData.call_to_action?.value?.link || '';
+              if (videoData.image_url) imageUrl = videoData.image_url;
+              if (videoData.image_hash) imageHash = videoData.image_hash;
+              if (videoData.video_id) videoId = videoData.video_id;
+              if (videoData.call_to_action?.type) ctaButton = videoData.call_to_action.type;
+            }
+          }
+        } catch (creativeError: any) {
+          console.warn('[createAdsetFromWinningAd] Failed to fetch creative details (non-critical):', creativeError.message);
+        }
+      }
+    }
+
+    // Build image URL from hash if we have hash but no URL
+    if (imageHash && !imageUrl) {
+      imageUrl = `https://graph.facebook.com/v24.0/${imageHash}`;
+    }
 
     // Create new adset
     const newAdset = new Adset({
@@ -741,39 +827,127 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       bidAmount: adsetDetails.bid_amount,
       promotedObject: adsetDetails.promoted_object,
       contentData: {
-        landingPageUrl: linkData.link || '',
+        landingPageUrl: link || '',
       },
     });
     await newAdset.save();
 
     const newAdsetId = newAdset._id.toString();
 
-    // Download image if we have an image hash
+    // Download and save creative asset (image or video)
     let importedAssetId: string | null = null;
-    if (linkData.image_hash) {
+    
+    if (isVideo && videoId) {
+      // Download video
       try {
-        const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
-          ? facebookAccount.accountId
-          : `act_${facebookAccount.accountId}`;
+        // Get video details from Facebook API
+        const videoResponse = await axios.get(
+          `https://graph.facebook.com/v24.0/${videoId}`,
+          {
+            params: {
+              fields: 'source,format,length',
+              access_token: updatedAccount.accessToken,
+            },
+          }
+        );
+        
+        const videoSourceUrl = videoResponse.data?.source;
+        if (videoSourceUrl) {
+          const videoDownloadResponse = await axios.get(videoSourceUrl, {
+            responseType: 'arraybuffer',
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+          });
+          const videoBuffer = Buffer.from(videoDownloadResponse.data);
+
+          // Determine file extension from format or default to mp4
+          const format = videoResponse.data?.format || {};
+          const mimeType = format.mime_type || 'video/mp4';
+          const extension = mimeType.includes('webm') ? 'webm' : mimeType.includes('quicktime') ? 'mov' : 'mp4';
+          const filename = `imported-${facebookAdId}-${Date.now()}.${extension}`;
+          const uploadsDir = path.join(process.cwd(), 'uploads', newAdsetId);
+          await fs.mkdir(uploadsDir, { recursive: true });
+          const filepath = path.join(uploadsDir, filename);
+          await fs.writeFile(filepath, videoBuffer);
+
+          const asset = new Asset({
+            adsetId: newAdsetId,
+            type: 'video',
+            filename,
+            filepath,
+            url: `/uploads/${newAdsetId}/${filename}`,
+            metadata: {
+              facebookVideoId: videoId,
+              mimeType: mimeType,
+              duration: videoResponse.data?.length,
+              size: videoBuffer.length,
+            },
+          });
+          await asset.save();
+          importedAssetId = asset._id.toString();
+        }
+      } catch (error: any) {
+        console.error('Failed to download and save video:', error);
+        // If video download fails, try to save the thumbnail image if available
+        if (imageUrl) {
+          try {
+            const imageResponse = await axios.get(imageUrl, {
+              responseType: 'arraybuffer',
+            });
+            const imageBuffer = Buffer.from(imageResponse.data);
+
+            const urlExtension = imageUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg';
+            const filename = `imported-${facebookAdId}-thumbnail-${Date.now()}.${urlExtension}`;
+            const uploadsDir = path.join(process.cwd(), 'uploads', newAdsetId);
+            await fs.mkdir(uploadsDir, { recursive: true });
+            const filepath = path.join(uploadsDir, filename);
+            await fs.writeFile(filepath, imageBuffer);
+
+            const asset = new Asset({
+              adsetId: newAdsetId,
+              type: 'image',
+              filename,
+              filepath,
+              url: `/uploads/${newAdsetId}/${filename}`,
+              metadata: {
+                facebookVideoId: videoId,
+                isVideoThumbnail: true,
+              },
+            });
+            await asset.save();
+            importedAssetId = asset._id.toString();
+          } catch (thumbError: any) {
+            console.error('Failed to download video thumbnail:', thumbError);
+          }
+        }
+      }
+    } else if (imageHash) {
+      // Download image
+      try {
+        const accountIdWithPrefix = updatedAccount.accountId.startsWith('act_')
+          ? updatedAccount.accountId
+          : `act_${updatedAccount.accountId}`;
         
         const adimagesResponse = await axios.get(
           `https://graph.facebook.com/v24.0/${accountIdWithPrefix}/adimages`,
           {
             params: {
-              hashes: `['${linkData.image_hash}']`,
-              access_token: facebookAccount.accessToken,
+              hashes: `['${imageHash}']`,
+              access_token: updatedAccount.accessToken,
             },
           }
         );
         
-        const imageData = adimagesResponse.data?.images?.[linkData.image_hash];
+        const imageData = adimagesResponse.data?.images?.[imageHash];
         if (imageData?.url) {
           const imageResponse = await axios.get(imageData.url, {
             responseType: 'arraybuffer',
           });
           const imageBuffer = Buffer.from(imageResponse.data);
 
-          const filename = `imported-${facebookAdId}-${Date.now()}.jpg`;
+          // Determine file extension from URL or default to jpg
+          const urlExtension = imageData.url.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg';
+          const filename = `imported-${facebookAdId}-${Date.now()}.${urlExtension}`;
           const uploadsDir = path.join(process.cwd(), 'uploads', newAdsetId);
           await fs.mkdir(uploadsDir, { recursive: true });
           const filepath = path.join(uploadsDir, filename);
@@ -786,7 +960,7 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
             filepath,
             url: `/uploads/${newAdsetId}/${filename}`,
             metadata: {
-              facebookImageHash: linkData.image_hash,
+              facebookImageHash: imageHash,
             },
           });
           await asset.save();
@@ -795,58 +969,75 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       } catch (error: any) {
         console.error('Failed to download and save image:', error);
       }
+    } else if (imageUrl && !imageHash) {
+      // Try to download from direct image URL (for video thumbnails)
+      try {
+        const imageResponse = await axios.get(imageUrl, {
+          responseType: 'arraybuffer',
+        });
+        const imageBuffer = Buffer.from(imageResponse.data);
+
+        const urlExtension = imageUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg';
+        const filename = `imported-${facebookAdId}-${Date.now()}.${urlExtension}`;
+        const uploadsDir = path.join(process.cwd(), 'uploads', newAdsetId);
+        await fs.mkdir(uploadsDir, { recursive: true });
+        const filepath = path.join(uploadsDir, filename);
+        await fs.writeFile(filepath, imageBuffer);
+
+        const asset = new Asset({
+          adsetId: newAdsetId,
+          type: 'image',
+          filename,
+          filepath,
+          url: `/uploads/${newAdsetId}/${filename}`,
+        });
+        await asset.save();
+        importedAssetId = asset._id.toString();
+      } catch (error: any) {
+        console.error('Failed to download and save image from URL:', error);
+      }
     }
 
     // Create AdCopy entries
     const copyEntries: any[] = [];
     
-    if (linkData.name) {
-      const headline = new AdCopy({
+    if (headline) {
+      const headlineCopy = new AdCopy({
         adsetId: newAdsetId,
         type: 'headline',
-        content: linkData.name,
+        content: headline,
         variantIndex: 0,
         generatedByAI: false,
       });
-      await headline.save();
-      copyEntries.push({ type: 'headline', id: headline._id });
+      await headlineCopy.save();
+      copyEntries.push({ type: 'headline', id: headlineCopy._id });
     }
 
-    if (linkData.message) {
-      const body = new AdCopy({
+    if (body) {
+      const bodyCopy = new AdCopy({
         adsetId: newAdsetId,
         type: 'body',
-        content: linkData.message,
+        content: body,
         variantIndex: 0,
         generatedByAI: false,
       });
-      await body.save();
-      copyEntries.push({ type: 'body', id: body._id });
+      await bodyCopy.save();
+      copyEntries.push({ type: 'body', id: bodyCopy._id });
     }
 
-    if (linkData.description) {
-      const description = new AdCopy({
+    if (description) {
+      const descriptionCopy = new AdCopy({
         adsetId: newAdsetId,
         type: 'description',
-        content: linkData.description,
+        content: description,
         variantIndex: 0,
         generatedByAI: false,
       });
-      await description.save();
-      copyEntries.push({ type: 'description', id: description._id });
+      await descriptionCopy.save();
+      copyEntries.push({ type: 'description', id: descriptionCopy._id });
     }
 
-    const ctaType = linkData.call_to_action?.type || 'LEARN_MORE';
-    const ctaContent = linkData.call_to_action?.value?.link_caption || ctaType.replace(/_/g, ' ');
-    const cta = new AdCopy({
-      adsetId: newAdsetId,
-      type: 'cta',
-      content: ctaContent,
-      variantIndex: 0,
-      generatedByAI: false,
-    });
-    await cta.save();
-    copyEntries.push({ type: 'cta', id: cta._id });
+    // CTA button type is stored in combination, not as copy
 
     res.json({
       success: true,
@@ -854,8 +1045,9 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       imported: {
         assetId: importedAssetId,
         copyEntries,
-        landingPageUrl: linkData.link,
-        ctaType,
+        landingPageUrl: link,
+        ctaType: ctaButton,
+        isVideo,
       },
       message: 'Adset created successfully with imported ad assets.',
     });
@@ -1011,16 +1203,7 @@ export const importWinningAd = async (req: AuthRequest, res: Response): Promise<
     }
 
     const ctaType = linkData.call_to_action?.type || 'LEARN_MORE';
-    const ctaContent = linkData.call_to_action?.value?.link_caption || ctaType.replace(/_/g, ' ');
-    const cta = new AdCopy({
-      adsetId: targetAdsetId,
-      type: 'cta',
-      content: ctaContent,
-      variantIndex: 0,
-      generatedByAI: false,
-    });
-    await cta.save();
-    copyEntries.push({ type: 'cta', id: cta._id });
+    // CTA button type is stored in combination, not as copy
 
     // Update target adset's contentData with landing page URL
     if (linkData.link) {

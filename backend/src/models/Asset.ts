@@ -7,6 +7,8 @@ export interface IAssetMetadata {
   duration?: number;
   mimeType?: string;
   facebookImageHash?: string;
+  facebookVideoId?: string;
+  isVideoThumbnail?: boolean;
 }
 
 export interface IAsset extends Document {
@@ -26,6 +28,9 @@ const AssetMetadataSchema = new Schema<IAssetMetadata>({
   size: Number,
   duration: Number,
   mimeType: String,
+  facebookImageHash: String,
+  facebookVideoId: String,
+  isVideoThumbnail: Boolean,
 });
 
 const AssetSchema = new Schema<IAsset>(

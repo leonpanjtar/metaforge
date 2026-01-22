@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { HiEye, HiArrowDownTray, HiArrowPath, HiPlus, HiXMark } from 'react-icons/hi2';
+import { HiEye, HiArrowPath, HiPlus, HiXMark } from 'react-icons/hi2';
 
 interface WinningAd {
   combinationId: string;
@@ -47,12 +47,6 @@ interface AdDetails {
   };
 }
 
-interface Adset {
-  _id: string;
-  name: string;
-  campaignId: string | { _id: string; name: string };
-}
-
 interface Campaign {
   _id: string;
   name: string;
@@ -86,9 +80,7 @@ const WinningAds = () => {
   const [until, setUntil] = useState<string>(defaultDates.until);
   const [selectedAd, setSelectedAd] = useState<WinningAd | null>(null);
   const [showDetails, setShowDetails] = useState(false);
-  const [showImport, setShowImport] = useState(false);
   const [showCreateAdset, setShowCreateAdset] = useState(false);
-  const [targetAdsetId, setTargetAdsetId] = useState<string>('');
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
   const [adsetName, setAdsetName] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -113,16 +105,6 @@ const WinningAds = () => {
     setForceRefresh((prev) => prev + 1);
     await refetch();
   };
-
-  // Fetch all adsets for import dropdown
-  const { data: adsetsData } = useQuery<Adset[]>({
-    queryKey: ['all-adsets'],
-    queryFn: async () => {
-      // Get all adsets for the user (no campaignId filter)
-      const response = await api.get('/adsets');
-      return response.data;
-    },
-  });
 
   // Fetch Facebook accounts
   const { data: accountsData } = useQuery<FacebookAccount[]>({
@@ -155,25 +137,6 @@ const WinningAds = () => {
     enabled: !!selectedAd && showDetails,
   });
 
-  // Import mutation
-  const importMutation = useMutation({
-    mutationFn: async (data: { facebookAdId: string; targetAdsetId: string }) => {
-      const response = await api.post('/winning-ads/import', data);
-      return response.data;
-    },
-    onSuccess: (data, variables) => {
-      alert(data.message || 'Ad imported successfully!');
-      setShowImport(false);
-      setSelectedAd(null);
-      queryClient.invalidateQueries({ queryKey: ['adsets'] });
-      // Navigate to the adset editor
-      navigate(`/adsets/edit/${variables.targetAdsetId}`);
-    },
-    onError: (error: any) => {
-      alert(error.response?.data?.error || 'Failed to import ad');
-    },
-  });
-
   // Create adset mutation
   const createAdsetMutation = useMutation({
     mutationFn: async (data: { facebookAdId: string; campaignId: string; adsetName: string }) => {
@@ -195,8 +158,6 @@ const WinningAds = () => {
       alert(error.response?.data?.error || 'Failed to create adset');
     },
   });
-
-  const adsets = adsetsData || [];
 
   // Apply quick filter and sort by score by default
   const filteredAds = (() => {
@@ -220,11 +181,6 @@ const WinningAds = () => {
   const handleViewDetails = (ad: WinningAd) => {
     setSelectedAd(ad);
     setShowDetails(true);
-  };
-
-  const handleImport = (ad: WinningAd) => {
-    setSelectedAd(ad);
-    setShowImport(true);
   };
 
   const handleCreateAdset = (ad: WinningAd) => {
@@ -387,14 +343,6 @@ const WinningAds = () => {
                         aria-label="View ad details"
                       >
                         <HiEye className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleImport(ad)}
-                        className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
-                        title="Import to Adset"
-                        aria-label="Import ad to adset"
-                      >
-                        <HiArrowDownTray className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => handleCreateAdset(ad)}
@@ -660,89 +608,6 @@ const WinningAds = () => {
               ) : (
                 <div className="text-red-600">Failed to load ad details</div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Import Modal */}
-      {showImport && selectedAd && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-900">Import Ad to Adset</h2>
-              <button
-                onClick={() => {
-                  setShowImport(false);
-                  setSelectedAd(null);
-                  setTargetAdsetId('');
-                }}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Target Adset
-                </label>
-                <select
-                  value={targetAdsetId}
-                  onChange={(e) => setTargetAdsetId(e.target.value)}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                >
-                  <option value="">Select an adset...</option>
-                  {adsets.map((adset) => {
-                    const campaignName = typeof adset.campaignId === 'object' ? adset.campaignId.name : 'Campaign';
-                    return (
-                      <option key={adset._id} value={adset._id}>
-                        {campaignName} / {adset.name}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-                <p className="font-semibold mb-1">What will be imported:</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Ad creative (image, headline, body, description, CTA)</li>
-                  <li>Landing page URL</li>
-                  <li>Adset targeting (for reference)</li>
-                </ul>
-                <p className="mt-2">You can then create variants in the Adset Editor.</p>
-              </div>
-
-              <div className="flex gap-3 justify-end">
-                <button
-                  onClick={() => {
-                    setShowImport(false);
-                    setSelectedAd(null);
-                    setTargetAdsetId('');
-                  }}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (!targetAdsetId) {
-                      alert('Please select a target adset');
-                      return;
-                    }
-                    importMutation.mutate({
-                      facebookAdId: selectedAd.facebookAdId,
-                      targetAdsetId,
-                    });
-                  }}
-                  disabled={importMutation.isPending || !targetAdsetId}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {importMutation.isPending ? 'Importing...' : 'Import'}
-                </button>
-              </div>
             </div>
           </div>
         </div>

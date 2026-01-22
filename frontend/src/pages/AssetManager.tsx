@@ -329,9 +329,14 @@ const AssetManager = () => {
                         className="w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
                       />
                     ) : (
-                      <div className="w-full h-48 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-transparent group-hover:border-blue-500 transition-all">
-                        <span className="text-gray-500">Video</span>
-                      </div>
+                      <video
+                        src={`${API_URL}${asset.url}`}
+                        className="w-full h-48 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 transition-all"
+                        muted
+                        preload="metadata"
+                      >
+                        Your browser does not support the video tag.
+                      </video>
                     )}
                     <div className="absolute top-0 left-0 right-0 bottom-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none">
                       <span className="opacity-0 group-hover:opacity-100 text-white text-sm">
@@ -369,18 +374,48 @@ const AssetManager = () => {
                         placeholder="3"
                         onClick={(e) => e.stopPropagation()}
                       />
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateVariantsForAsset(asset._id);
-                        }}
-                        disabled={generatingForAsset === asset._id}
-                        className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
-                        title="Generate AI variants"
-                        aria-label="Generate AI variants"
-                      >
-                        {generatingForAsset === asset._id ? '...' : <HiSparkles className="w-4 h-4" />}
-                      </button>
+                      {asset.type === 'image' && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!adsetId || generatingForAsset === asset._id) return;
+                            
+                            setGeneratingForAsset(asset._id);
+                            try {
+                              const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+                              
+                              // Fetch the asset file
+                              const assetResponse = await fetch(`${API_URL}${asset.url}`);
+                              const assetBlob = await assetResponse.blob();
+                              
+                              // Convert Blob to File
+                              const assetFile = new File([assetBlob], asset.filename, {
+                                type: assetBlob.type || 'image/jpeg',
+                              });
+                              
+                              // Create FormData
+                              const formData = new FormData();
+                              formData.append('image', assetFile);
+                              formData.append('adsetId', adsetId);
+                              formData.append('count', '1'); // Generate 1 variant
+                              formData.append('instructions', ''); // No specific instructions - use default variation
+                              
+                              await generateOpenAIVariantsMutation.mutateAsync(formData);
+                              queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+                            } catch (error: any) {
+                              alert(error.response?.data?.error || error.message || 'Failed to generate variant');
+                            } finally {
+                              setGeneratingForAsset(null);
+                            }
+                          }}
+                          disabled={generatingForAsset === asset._id}
+                          className="flex-1 px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center"
+                          title="Generate AI variant"
+                          aria-label="Generate AI variant"
+                        >
+                          {generatingForAsset === asset._id ? '...' : <HiSparkles className="w-4 h-4" />}
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -479,7 +514,13 @@ const AssetManager = () => {
                 />
               ) : (
                 <div className="p-8 text-center">
-                  <p className="text-gray-500 mb-4">Video preview not available</p>
+                  <video
+                    src={`${API_URL}${previewAsset.url}`}
+                    controls
+                    className="max-w-full max-h-[70vh] mx-auto"
+                  >
+                    Your browser does not support the video tag.
+                  </video>
                   <p className="text-sm text-gray-400">{previewAsset.filename}</p>
                 </div>
               )}

@@ -18,20 +18,16 @@ export const generateCombinations = async (
 ): Promise<void> => {
   try {
     const { adsetId } = req.params;
-    // Accept both formats: selectedAssets/assets, selectedHooks/hooks, etc.
+    // Accept both formats: selectedAssets/assets, etc.
     const { 
       selectedAssets = [],
-      selectedHooks = [],
       selectedBodies = [],
-      selectedCTAs = [],
       selectedHeadlines = [],
       selectedDescriptions = [],
       selectedCTATypes = [],
       // Also accept shorter format from frontend
       assets: assetsPayload = [],
-      hooks: hooksPayload = [],
       bodies: bodiesPayload = [],
-      ctas: ctasPayload = [],
       headlines: headlinesPayload = [],
       descriptions: descriptionsPayload = [],
       ctaTypes: ctaTypesPayload = []
@@ -39,9 +35,7 @@ export const generateCombinations = async (
 
     // Use selected* format if provided, otherwise use shorter format
     const finalSelectedAssets = selectedAssets.length > 0 ? selectedAssets : assetsPayload;
-    const finalSelectedHooks = selectedHooks.length > 0 ? selectedHooks : hooksPayload;
     const finalSelectedBodies = selectedBodies.length > 0 ? selectedBodies : bodiesPayload;
-    const finalSelectedCTAs = selectedCTAs.length > 0 ? selectedCTAs : ctasPayload;
     const finalSelectedHeadlines = selectedHeadlines.length > 0 ? selectedHeadlines : headlinesPayload;
     const finalSelectedDescriptions = selectedDescriptions.length > 0 ? selectedDescriptions : descriptionsPayload;
     const finalSelectedCTATypes = selectedCTATypes.length > 0 ? selectedCTATypes : ctaTypesPayload;
@@ -84,22 +78,12 @@ export const generateCombinations = async (
       res.status(400).json({ error: 'Please select at least one description.' });
       return;
     }
-    if (finalSelectedCTAs.length === 0) {
-      res.status(400).json({ error: 'Please select at least one CTA.' });
-      return;
-    }
 
     // Fetch only the selected components
     const assets = await Asset.find({ _id: { $in: finalSelectedAssets }, adsetId });
     const headlines = await AdCopy.find({ _id: { $in: finalSelectedHeadlines }, adsetId, type: 'headline' });
     const bodies = await AdCopy.find({ _id: { $in: finalSelectedBodies }, adsetId, type: 'body' });
     const descriptions = await AdCopy.find({ _id: { $in: finalSelectedDescriptions }, adsetId, type: 'description' });
-    const ctas = await AdCopy.find({ _id: { $in: finalSelectedCTAs }, adsetId, type: 'cta' });
-    
-    // Hooks are optional, so only fetch if selected
-    const hooks = finalSelectedHooks.length > 0
-      ? await AdCopy.find({ _id: { $in: finalSelectedHooks }, adsetId, type: 'hook' })
-      : [];
 
     // Validate that fetched components match selected IDs (in case some IDs are invalid)
     if (assets.length !== finalSelectedAssets.length) {
@@ -116,10 +100,6 @@ export const generateCombinations = async (
     }
     if (descriptions.length !== finalSelectedDescriptions.length) {
       res.status(400).json({ error: 'Some selected descriptions were not found.' });
-      return;
-    }
-    if (ctas.length !== finalSelectedCTAs.length) {
-      res.status(400).json({ error: 'Some selected CTAs were not found.' });
       return;
     }
 
@@ -142,40 +122,29 @@ export const generateCombinations = async (
       for (const headline of headlines) {
         for (const body of bodies) {
           for (const description of descriptions) {
-            for (const cta of ctas) {
-              // For each hook (if any), create a combination
-              // If no hooks, create one combination without hook
-              const hookList = hooks.length > 0 ? hooks : [null];
-              
-              for (const hook of hookList) {
-                // For each CTA button type, create a combination
-                for (const ctaType of ctaTypes) {
-                  // Create combination with default scores (scoring can be done later)
-                  const combination = new AdCombination({
-                    adsetId,
-                    assetIds: [asset._id],
-                    headlineId: headline._id,
-                    hookId: hook?._id,
-                    bodyId: body._id,
-                    descriptionId: description._id,
-                    ctaId: cta._id,
-                    ctaType: ctaType,
-                    url: landingPageUrl,
-                    scores: {
-                      hook: 0,
-                      alignment: 0,
-                      fit: 0,
-                      clarity: 0,
-                      match: 0,
-                    },
-                    overallScore: 0,
-                    predictedCTR: 0,
-                    deployedToFacebook: false,
-                  });
+            // For each CTA button type, create a combination
+            for (const ctaType of ctaTypes) {
+              // Create combination with default scores (scoring can be done later)
+              const combination = new AdCombination({
+                adsetId,
+                assetIds: [asset._id],
+                headlineId: headline._id,
+                bodyId: body._id,
+                descriptionId: description._id,
+                ctaType: ctaType,
+                url: landingPageUrl,
+                scores: {
+                  alignment: 0,
+                  fit: 0,
+                  clarity: 0,
+                  match: 0,
+                },
+                overallScore: 0,
+                predictedCTR: 0,
+                deployedToFacebook: false,
+              });
 
-                  combinationDocs.push(combination);
-                }
-              }
+              combinationDocs.push(combination);
             }
           }
         }
@@ -226,10 +195,8 @@ export const scoreCombinations = async (
     const combinations = await AdCombination.find({ adsetId })
       .populate('assetIds')
       .populate('headlineId')
-      .populate('hookId')
       .populate('bodyId')
       .populate('descriptionId')
-      .populate('ctaId');
 
     if (combinations.length === 0) {
       res.json({
@@ -297,9 +264,8 @@ export const scoreCombinations = async (
           const headline = combination.headlineId as any;
           const body = combination.bodyId as any;
           const description = combination.descriptionId as any;
-          const cta = combination.ctaId as any;
 
-          if (!asset || !headline || !body || !description || !cta) {
+          if (!asset || !headline || !body || !description) {
             console.error(`Combination ${combination._id} is missing required components`);
             sendSSE('error', {
               index: i,
@@ -315,7 +281,6 @@ export const scoreCombinations = async (
             headline,
             body,
             description,
-            cta,
             adset as any
           );
 
@@ -433,10 +398,8 @@ export const getCombinations = async (req: AuthRequest, res: Response): Promise<
     let combinationQuery = AdCombination.find({ adsetId })
       .populate('assetIds')
       .populate('headlineId')
-      .populate('hookId')
       .populate('bodyId')
       .populate('descriptionId')
-      .populate('ctaId')
       .sort(sortOptions);
 
     // Only apply limit if explicitly provided
@@ -479,10 +442,8 @@ export const previewCombination = async (
     })
       .populate('assetIds')
       .populate('headlineId')
-      .populate('hookId')
       .populate('bodyId')
       .populate('descriptionId')
-      .populate('ctaId');
 
     if (!combination) {
       res.status(404).json({ error: 'Combination not found' });
@@ -522,22 +483,11 @@ export const previewCombination = async (
     // Build creative spec
     const asset = (combination.assetIds as any[])[0];
     const headline = combination.headlineId as any;
-    const hook = combination.hookId as any;
     const body = combination.bodyId as any;
     const description = combination.descriptionId as any;
-    const cta = combination.ctaId as any;
 
-    // Build ad body: hook + body + CTA (with empty lines)
-    let adBody = '';
-    if (hook?.content) {
-      adBody += hook.content + '\n\n';
-    }
-    if (body?.content) {
-      adBody += body.content;
-    }
-    if (cta?.content) {
-      adBody += '\n\n' + cta.content;
-    }
+    // Build ad body
+    const adBody = body?.content || '';
 
     // Ensure accountId has 'act_' prefix for Facebook API
     const adAccountId = updatedAccount.accountId.startsWith('act_') 
@@ -548,38 +498,83 @@ export const previewCombination = async (
     const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.API_URL || 'http://localhost:3001';
     let imageHash = asset.metadata?.facebookImageHash;
 
-    if (!imageHash && asset.url) {
-      try {
-        // Upload image to get hash
-        const imageUrl = asset.url.startsWith('http') 
-          ? asset.url 
-          : `${PUBLIC_BASE_URL}${asset.url}`;
-        imageHash = await facebookApi.uploadAdImage(adAccountId, imageUrl);
-      } catch (error: any) {
-        console.error('Failed to upload image for preview:', error);
-        // Continue without hash - preview might still work
-      }
-    }
-
     // Use the selected CTA type from combination, or fallback to LEARN_MORE
     const ctaType = combination.ctaType || 'LEARN_MORE';
+    const landingPageUrl = combination.url || (adset as any).contentData?.landingPageUrl || '';
 
-    const creativeSpec = {
-      objectStorySpec: {
-        page_id: pageId,
-        link_data: {
-          image_hash: imageHash || '',
-          link: combination.url || (adset as any).contentData?.landingPageUrl || '',
-          message: adBody,
-          name: headline?.content || '',
-          description: description?.content || '',
-          call_to_action: {
-            type: ctaType,
+    let creativeSpec: any;
+
+    if (asset.type === 'video') {
+      // Handle video asset for preview
+      let videoId = asset.metadata?.facebookVideoId;
+      
+      if (!videoId && asset.url) {
+        try {
+          const videoUrl = asset.url.startsWith('http') 
+            ? asset.url 
+            : `${PUBLIC_BASE_URL}${asset.url}`;
+          videoId = await facebookApi.uploadAdVideo(adAccountId, videoUrl);
+          // Save video ID to asset metadata for future use
+          asset.metadata = asset.metadata || {};
+          asset.metadata.facebookVideoId = videoId;
+          await asset.save();
+        } catch (error: any) {
+          console.error('Failed to upload video for preview:', error);
+          // Continue without video ID - preview might still work
+        }
+      }
+
+      creativeSpec = {
+        objectStorySpec: {
+          page_id: pageId,
+          video_data: {
+            video_id: videoId || '',
+            message: adBody,
+            title: headline?.content || '',
+            link_description: description?.content || '',
+            call_to_action: {
+              type: ctaType,
+              value: {
+                link: landingPageUrl,
+              },
+            },
           },
         },
-      },
-      pageId: pageId,
-    };
+        pageId: pageId,
+      };
+    } else {
+      // Handle image asset for preview
+      let imageHash = asset.metadata?.facebookImageHash;
+      
+      if (!imageHash && asset.url) {
+        try {
+          const imageUrl = asset.url.startsWith('http') 
+            ? asset.url 
+            : `${PUBLIC_BASE_URL}${asset.url}`;
+          imageHash = await facebookApi.uploadAdImage(adAccountId, imageUrl);
+        } catch (error: any) {
+          console.error('Failed to upload image for preview:', error);
+          // Continue without hash - preview might still work
+        }
+      }
+
+      creativeSpec = {
+        objectStorySpec: {
+          page_id: pageId,
+          link_data: {
+            image_hash: imageHash || '',
+            link: landingPageUrl,
+            message: adBody,
+            name: headline?.content || '',
+            description: description?.content || '',
+            call_to_action: {
+              type: ctaType,
+            },
+          },
+        },
+        pageId: pageId,
+      };
+    }
 
     // Generate preview (generate for mobile feed first)
     const previews = await facebookApi.generateAIPreviews(
@@ -595,7 +590,7 @@ export const previewCombination = async (
         headline: headline?.content,
         body: adBody,
         description: description?.content,
-        cta: cta?.content,
+        ctaType: combination.ctaType || 'LEARN_MORE',
         url: combination.url || (adset as any).contentData?.landingPageUrl,
         imageUrl: asset.url,
       },

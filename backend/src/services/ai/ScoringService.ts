@@ -4,7 +4,6 @@ import { Asset } from '../../models/Asset';
 import { AdCopy } from '../../models/AdCopy';
 
 export interface ScoreBreakdown {
-  hook: number;
   alignment: number;
   fit: number;
   clarity: number;
@@ -26,16 +25,12 @@ export class ScoringService {
     headline: AdCopy,
     body: AdCopy,
     description: AdCopy,
-    cta: AdCopy,
     adset: Adset
   ): Promise<{
     scores: ScoreBreakdown;
     overallScore: number;
     predictedCTR: number;
   }> {
-    // Hook strength (image/video analysis)
-    const hookScore = await this.scoreHookStrength(asset);
-
     // Copy-visual alignment
     const alignmentScore = await this.scoreCopyVisualAlignment(
       asset,
@@ -46,14 +41,13 @@ export class ScoringService {
     // Target market fit
     const fitScore = this.scoreTargetMarketFit(adset, headline, body);
 
-    // CTA clarity
-    const clarityScore = await this.scoreCTAClarity(cta);
+    // CTA clarity (removed - using button type only)
+    const clarityScore = 75; // Default score since we only use button types now
 
     // Message-market match
     const matchScore = await this.scoreMessageMarketMatch(adset, headline, body);
 
     const scores: ScoreBreakdown = {
-      hook: hookScore,
       alignment: alignmentScore,
       fit: fitScore,
       clarity: clarityScore,
@@ -62,11 +56,10 @@ export class ScoringService {
 
     // Weighted average
     const overallScore =
-      hookScore * 0.25 +
-      alignmentScore * 0.2 +
-      fitScore * 0.2 +
-      clarityScore * 0.15 +
-      matchScore * 0.2;
+      alignmentScore * 0.3 +
+      fitScore * 0.25 +
+      clarityScore * 0.2 +
+      matchScore * 0.25;
 
     // Predict CTR based on scores (simplified model)
     const predictedCTR = Math.max(0, Math.min(10, overallScore / 10));
@@ -76,14 +69,6 @@ export class ScoringService {
       overallScore: Math.round(overallScore),
       predictedCTR: parseFloat(predictedCTR.toFixed(2)),
     };
-  }
-
-  private async scoreHookStrength(asset: Asset): Promise<number> {
-    // Simplified scoring - in production, use image analysis
-    if (asset.type === 'image') {
-      return 60 + Math.random() * 30; // 60-90
-    }
-    return 50 + Math.random() * 40; // 50-90
   }
 
   private async scoreCopyVisualAlignment(

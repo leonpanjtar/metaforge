@@ -36,7 +36,7 @@ interface Asset {
 
 interface AdCopy {
   _id: string;
-  type: 'headline' | 'body' | 'description' | 'cta' | 'hook';
+  type: 'headline' | 'body' | 'description';
   content: string;
   variantIndex: number;
   generatedByAI: boolean;
@@ -46,14 +46,11 @@ interface Combination {
   _id: string;
   assetIds: any[];
   headlineId: { _id: string; content: string };
-  hookId?: { _id: string; content: string };
   bodyId: { _id: string; content: string };
   descriptionId: { _id: string; content: string };
-  ctaId: { _id: string; content: string };
   ctaType?: string;
   url?: string;
   scores: {
-    hook: number;
     alignment: number;
     fit: number;
     clarity: number;
@@ -209,14 +206,6 @@ const AdsetEditor = () => {
       count: 5, 
       description: 'Create compelling body copy that addresses pain points, highlights benefits, and creates urgency. Use problem-agitate-solve framework. Keep it conversational and benefit-focused.' 
     },
-    ctas: { 
-      count: 3, 
-      description: 'Generate action-oriented CTAs that create urgency. Examples: "Get Started", "Claim Your Free Quote", "Book a Consultation", "Download Now", "Learn More". Make them specific and compelling.' 
-    },
-    hooks: { 
-      count: 5, 
-      description: 'Create attention-grabbing hooks that stop the scroll. Use questions, bold statements, curiosity gaps, or surprising facts. Make them relevant to the target audience and angle.' 
-    },
     titles: { 
       count: 10, 
       description: 'Generate benefit-driven headlines that communicate value quickly. Use numbers, questions, and power words. Focus on outcomes and transformation. Keep under 60 characters for best results.' 
@@ -227,7 +216,7 @@ const AdsetEditor = () => {
     },
   });
   const [customCopyInput, setCustomCopyInput] = useState<{
-    type: 'headline' | 'hook' | 'body' | 'description' | 'cta' | null;
+    type: 'headline' | 'body' | 'description' | null;
     content: string;
   }>({ type: null, content: '' });
 
@@ -366,6 +355,103 @@ const AdsetEditor = () => {
     },
   });
 
+  // Generate content variant mutation
+  const [generatingVariantFor, setGeneratingVariantFor] = useState<string | null>(null);
+  const generateVariantMutation = useMutation({
+    mutationFn: async (data: { copyId: string; contentType: string; currentContent: string }) => {
+      const response = await api.post('/ai/generate-content-variant', {
+        adsetId,
+        copyId: data.copyId,
+        contentType: data.contentType,
+        currentContent: data.currentContent,
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ad-copies', adsetId] });
+      setGeneratingVariantFor(null);
+      // New copy is automatically added via query invalidation
+    },
+    onError: (error: any) => {
+      setGeneratingVariantFor(null);
+      alert(error.response?.data?.error || 'Failed to generate variant');
+    },
+  });
+
+  const handleGenerateVariant = async (copy: AdCopy) => {
+    if (!adsetId) return;
+    setGeneratingVariantFor(copy._id);
+    await generateVariantMutation.mutateAsync({
+      copyId: copy._id,
+      contentType: copy.type,
+      currentContent: editedCopyContent[copy._id] !== undefined 
+        ? editedCopyContent[copy._id] 
+        : copy.content,
+    });
+  };
+
+  // Generate content data mutations
+  const [generatingContentData, setGeneratingContentData] = useState<{
+    angle: boolean;
+    keywords: boolean;
+    importantThings: boolean;
+  }>({
+    angle: false,
+    keywords: false,
+    importantThings: false,
+  });
+
+  const generateContentDataMutation = useMutation({
+    mutationFn: async (data: { field: 'angle' | 'keywords' | 'importantThings' }) => {
+      if (!adsetId || !landingPageUrl) {
+        throw new Error('Adset ID and Landing Page URL are required');
+      }
+      const response = await api.post('/ai/generate-content-data', {
+        adsetId,
+        url: landingPageUrl,
+        field: data.field,
+      });
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      if (variables.field === 'angle' && data.angle) {
+        setAngle(data.angle);
+      } else if (variables.field === 'keywords' && data.keywords) {
+        // Add generated keywords to existing keywords (avoid duplicates)
+        setKeywords(prev => {
+          const newKeywords = Array.isArray(data.keywords) ? data.keywords : [data.keywords];
+          const combined = [...prev, ...newKeywords];
+          return Array.from(new Set(combined)); // Remove duplicates
+        });
+      } else if (variables.field === 'importantThings' && data.importantThings) {
+        setImportantThings(data.importantThings);
+      }
+      setGeneratingContentData(prev => ({
+        ...prev,
+        [variables.field]: false,
+      }));
+    },
+    onError: (error: any, variables) => {
+      setGeneratingContentData(prev => ({
+        ...prev,
+        [variables.field]: false,
+      }));
+      alert(error.response?.data?.error || error.message || 'Failed to generate content data');
+    },
+  });
+
+  const handleGenerateContentData = async (field: 'angle' | 'keywords' | 'importantThings') => {
+    if (!landingPageUrl) {
+      alert('Please enter a Landing Page URL first');
+      return;
+    }
+    setGeneratingContentData(prev => ({
+      ...prev,
+      [field]: true,
+    }));
+    await generateContentDataMutation.mutateAsync({ field });
+  };
+
   // Track edited copy content
   const [editedCopyContent, setEditedCopyContent] = useState<Record<string, string>>({});
   // Removed saving/saved state - autosave is now silent
@@ -443,17 +529,13 @@ const AdsetEditor = () => {
   // Component selection state
   const [selectedComponents, setSelectedComponents] = useState<{
     assets: string[];
-    hooks: string[];
     bodies: string[];
-    ctas: string[];
     headlines: string[];
     descriptions: string[];
     ctaTypes: string[]; // Facebook CTA button types
   }>({
     assets: [],
-    hooks: [],
     bodies: [],
-    ctas: [],
     headlines: [],
     descriptions: [],
     ctaTypes: [],
@@ -926,7 +1008,6 @@ const AdsetEditor = () => {
       console.log('Saving content data:', payload);
       await saveContentMutation.mutateAsync(payload);
       // Show success message
-      alert('Content data saved successfully!');
     } catch (error: any) {
       console.error('Failed to save content:', error);
       alert(error.response?.data?.error || 'Failed to save content data. Please try again.');
@@ -1280,9 +1361,27 @@ const AdsetEditor = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Angle / Positioning
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Angle / Positioning
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateContentData('angle')}
+                    disabled={!landingPageUrl || generatingContentData.angle}
+                    className="flex items-center gap-1 text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Generate AI angle from landing page"
+                  >
+                    {generatingContentData.angle ? (
+                      <span className="text-xs">...</span>
+                    ) : (
+                      <>
+                        <HiSparkles className="w-4 h-4" />
+                        <span className="text-xs">AI</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <textarea
                   value={angle}
                   onChange={(e) => {
@@ -1307,9 +1406,27 @@ const AdsetEditor = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Keywords
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Keywords
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateContentData('keywords')}
+                    disabled={!landingPageUrl || generatingContentData.keywords}
+                    className="flex items-center gap-1 text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Generate AI keywords from landing page"
+                  >
+                    {generatingContentData.keywords ? (
+                      <span className="text-xs">...</span>
+                    ) : (
+                      <>
+                        <HiSparkles className="w-4 h-4" />
+                        <span className="text-xs">AI</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <div className="flex gap-2 mb-2">
                   <input
                     type="text"
@@ -1352,9 +1469,27 @@ const AdsetEditor = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Important Things / Key Points
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Important Things / Key Points
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateContentData('importantThings')}
+                    disabled={!landingPageUrl || generatingContentData.importantThings}
+                    className="flex items-center gap-1 text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Generate AI key points from landing page"
+                  >
+                    {generatingContentData.importantThings ? (
+                      <span className="text-xs">...</span>
+                    ) : (
+                      <>
+                        <HiSparkles className="w-4 h-4" />
+                        <span className="text-xs">AI</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <textarea
                   value={importantThings}
                   onChange={(e) => {
@@ -1445,86 +1580,6 @@ const AdsetEditor = () => {
                           setCopyGenConfig({
                             ...copyGenConfig,
                             bodies: { ...copyGenConfig.bodies, description: e.target.value },
-                          });
-                          // Auto-resize
-                          e.target.style.height = 'auto';
-                          e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-                        }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement;
-                          target.style.height = 'auto';
-                          target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
-                        }}
-                        rows={3}
-                        style={{ minHeight: '60px', maxHeight: '200px', resize: 'vertical' }}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 leading-relaxed"
-                      />
-                    </div>
-
-                    {/* CTAs */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        CTAs (Count) - Added to end of bodies
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={copyGenConfig.ctas.count}
-                        onChange={(e) =>
-                          setCopyGenConfig({
-                            ...copyGenConfig,
-                            ctas: { ...copyGenConfig.ctas, count: parseInt(e.target.value) || 0 },
-                          })
-                        }
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 mb-2"
-                      />
-                      <textarea
-                        placeholder="Describe types of CTAs (e.g., action-oriented, soft, direct)"
-                        value={copyGenConfig.ctas.description}
-                        onChange={(e) => {
-                          setCopyGenConfig({
-                            ...copyGenConfig,
-                            ctas: { ...copyGenConfig.ctas, description: e.target.value },
-                          });
-                          // Auto-resize
-                          e.target.style.height = 'auto';
-                          e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-                        }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement;
-                          target.style.height = 'auto';
-                          target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
-                        }}
-                        rows={3}
-                        style={{ minHeight: '60px', maxHeight: '200px', resize: 'vertical' }}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 leading-relaxed"
-                      />
-                    </div>
-
-                    {/* Hooks */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Hooks (Count)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={copyGenConfig.hooks.count}
-                        onChange={(e) =>
-                          setCopyGenConfig({
-                            ...copyGenConfig,
-                            hooks: { ...copyGenConfig.hooks, count: parseInt(e.target.value) || 0 },
-                          })
-                        }
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 mb-2"
-                      />
-                      <textarea
-                        placeholder="Describe types of hooks (e.g., question-based, bold statement, curiosity)"
-                        value={copyGenConfig.hooks.description}
-                        onChange={(e) => {
-                          setCopyGenConfig({
-                            ...copyGenConfig,
-                            hooks: { ...copyGenConfig.hooks, description: e.target.value },
                           });
                           // Auto-resize
                           e.target.style.height = 'auto';
@@ -1655,17 +1710,15 @@ const AdsetEditor = () => {
                     onChange={(e) =>
                       setCustomCopyInput({
                         ...customCopyInput,
-                        type: e.target.value as 'headline' | 'hook' | 'body' | 'description' | 'cta' | null,
+                        type: e.target.value as 'headline' | 'body' | 'description' | null,
                       })
                     }
                     className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   >
                     <option value="">Select type...</option>
                     <option value="headline">Headline</option>
-                    <option value="hook">Hook</option>
                     <option value="body">Body</option>
                     <option value="description">Description</option>
-                    <option value="cta">CTA</option>
                   </select>
                   <input
                     type="text"
@@ -1696,42 +1749,25 @@ const AdsetEditor = () => {
               {/* Display Copies */}
               {copies && copies.length > 0 ? (
                 <div className="space-y-4">
-                  {['headline', 'hook', 'body', 'description', 'cta'].map((type) => {
+                  {['headline', 'body', 'description'].map((type) => {
                     const typeCopies = copies.filter((c) => c.type === type);
-                    // Debug: log CTAs specifically
-                    if (type === 'cta') {
-                      console.log('CTAs found:', typeCopies.length, typeCopies);
-                    }
-                    // Always show the section even if empty, so users know CTAs are supported
-                    // But only render if there are copies
+                    
                     if (typeCopies.length === 0) {
-                      // Show empty state for CTAs specifically to make it clear they're supported
-                      if (type === 'cta') {
-                        return (
-                          <div key={type} className="border rounded-lg p-4 bg-green-50 border-green-200">
-                            <h3 className="font-semibold text-green-900 mb-3">CTAs (0)</h3>
-                            <p className="text-sm text-gray-500 italic">No CTAs generated yet. Generate copy with CTAs enabled above.</p>
-                          </div>
-                        );
-                      }
                       return null;
                     }
 
                     // Map type to display name
                     const typeDisplayNames: Record<string, string> = {
                       headline: 'Headlines',
-                      hook: 'Hooks',
                       body: 'Bodies',
                       description: 'Descriptions',
-                      cta: 'CTAs',
                     };
                     
                     const isBody = type === 'body';
-                    const isCTA = type === 'cta';
                     
                     return (
-                      <div key={type} className={`border rounded-lg p-4 ${isBody ? 'bg-blue-50 border-blue-200' : isCTA ? 'bg-green-50 border-green-200' : ''}`}>
-                        <h3 className={`font-semibold mb-3 capitalize ${isBody ? 'text-blue-900' : isCTA ? 'text-green-900' : 'text-gray-900'}`}>
+                      <div key={type} className={`border rounded-lg p-4 ${isBody ? 'bg-blue-50 border-blue-200' : ''}`}>
+                        <h3 className={`font-semibold mb-3 capitalize ${isBody ? 'text-blue-900' : 'text-gray-900'}`}>
                           {typeDisplayNames[type] || `${type}s`} ({typeCopies.length})
                         </h3>
                         <div className="space-y-2">
@@ -1741,10 +1777,9 @@ const AdsetEditor = () => {
                               : copy.content;
                             // Determine textarea size based on type
                             const isBody = type === 'body';
-                            const isCTA = type === 'cta';
-                            const minHeight = isBody ? '120px' : isCTA ? '60px' : '40px';
-                            const maxHeight = isBody ? '500px' : isCTA ? '200px' : '200px';
-                            const textSize = isBody ? 'text-base' : isCTA ? 'text-sm' : 'text-sm';
+                            const minHeight = isBody ? '120px' : '40px';
+                            const maxHeight = isBody ? '500px' : '200px';
+                            const textSize = isBody ? 'text-base' : 'text-sm';
                             const lineHeight = isBody ? 'leading-relaxed' : 'leading-normal';
                             
                             return (
@@ -1782,7 +1817,7 @@ const AdsetEditor = () => {
                                     }}
                                     className={`flex-1 ${textSize} ${lineHeight} text-gray-700 bg-white border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none`}
                                     style={{ minHeight, maxHeight }}
-                                    rows={isBody ? 5 : isCTA ? 2 : 1}
+                                    rows={isBody ? 5 : 1}
                                   />
                                   <div className="flex items-start gap-2 flex-shrink-0">
                                     {copy.generatedByAI && (
@@ -1790,6 +1825,19 @@ const AdsetEditor = () => {
                                         AI
                                       </span>
                                     )}
+                                    <button
+                                      onClick={() => handleGenerateVariant(copy)}
+                                      disabled={generateVariantMutation.isPending || generatingVariantFor === copy._id}
+                                      className="opacity-0 group-hover:opacity-100 text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded transition-opacity flex items-center justify-center"
+                                      title="Generate AI variant"
+                                      aria-label="Generate AI variant"
+                                    >
+                                      {generatingVariantFor === copy._id ? (
+                                        <span className="text-xs">...</span>
+                                      ) : (
+                                        <HiSparkles className="w-4 h-4" />
+                                      )}
+                                    </button>
                                     <button
                                       onClick={() => handleDeleteCopy(copy._id)}
                                       disabled={deleteCopyMutation.isPending}
@@ -1939,20 +1987,45 @@ const AdsetEditor = () => {
                             <HiTrash className="w-4 h-4" />
                           </button>
                           
-                          {/* Generate Variations Button (only for images) */}
+                          {/* Generate Variant Button (magic button - generates 1 variant) */}
                           {asset.type === 'image' && (
                             <button
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                setSelectedAssetForVariants(asset);
-                                setVariantCount(3);
-                                setVariantPrompt('');
-                                setShowVariantGenerator(true);
+                                if (!adsetId || generatingForAsset === asset._id) return;
+                                
+                                setGeneratingForAsset(asset._id);
+                                try {
+                                  const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+                                  
+                                  // Fetch the asset file
+                                  const assetResponse = await fetch(`${API_URL}${asset.url}`);
+                                  const assetBlob = await assetResponse.blob();
+                                  
+                                  // Convert Blob to File
+                                  const assetFile = new File([assetBlob], asset.filename, {
+                                    type: assetBlob.type || 'image/jpeg',
+                                  });
+                                  
+                                  // Create FormData
+                                  const formData = new FormData();
+                                  formData.append('image', assetFile);
+                                  formData.append('adsetId', adsetId);
+                                  formData.append('count', '1'); // Generate 1 variant
+                                  formData.append('instructions', ''); // No specific instructions - use default variation
+                                  
+                                  await generateOpenAIVariantsMutation.mutateAsync(formData);
+                                  queryClient.invalidateQueries({ queryKey: ['assets', adsetId] });
+                                } catch (error: any) {
+                                  alert(error.response?.data?.error || error.message || 'Failed to generate variant');
+                                } finally {
+                                  setGeneratingForAsset(null);
+                                }
                               }}
                               disabled={generatingForAsset === asset._id}
-                              className="flex-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
-                              title="Generate variants"
-                              aria-label="Generate variants"
+                              className="flex-1 px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center"
+                              title="Generate AI variant"
+                              aria-label="Generate AI variant"
                             >
                               {generatingForAsset === asset._id ? '...' : <HiSparkles className="w-4 h-4" />}
                             </button>
@@ -2018,42 +2091,6 @@ const AdsetEditor = () => {
                       </div>
                     </div>
 
-                    {/* Hooks */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Hooks ({copies?.filter(c => c.type === 'hook').length || 0})
-                      </label>
-                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                        {copies && copies.filter(c => c.type === 'hook').length > 0 ? (
-                          copies.filter(c => c.type === 'hook').map((hook) => (
-                            <label key={hook._id} className="flex items-center gap-2 py-1 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedComponents.hooks.includes(hook._id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedComponents(prev => ({
-                                      ...prev,
-                                      hooks: [...prev.hooks, hook._id]
-                                    }));
-                                  } else {
-                                    setSelectedComponents(prev => ({
-                                      ...prev,
-                                      hooks: prev.hooks.filter(id => id !== hook._id)
-                                    }));
-                                  }
-                                }}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span className="truncate text-xs">{hook.content.substring(0, 50)}...</span>
-                            </label>
-                          ))
-                        ) : (
-                          <p className="text-xs text-gray-500">No hooks available</p>
-                        )}
-                      </div>
-                    </div>
-
                     {/* Bodies */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2086,42 +2123,6 @@ const AdsetEditor = () => {
                           ))
                         ) : (
                           <p className="text-xs text-gray-500">No bodies available</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* CTAs */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        CTAs ({copies?.filter(c => c.type === 'cta').length || 0})
-                      </label>
-                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                        {copies && copies.filter(c => c.type === 'cta').length > 0 ? (
-                          copies.filter(c => c.type === 'cta').map((cta) => (
-                            <label key={cta._id} className="flex items-center gap-2 py-1 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedComponents.ctas.includes(cta._id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedComponents(prev => ({
-                                      ...prev,
-                                      ctas: [...prev.ctas, cta._id]
-                                    }));
-                                  } else {
-                                    setSelectedComponents(prev => ({
-                                      ...prev,
-                                      ctas: prev.ctas.filter(id => id !== cta._id)
-                                    }));
-                                  }
-                                }}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span className="truncate text-xs">{cta.content}</span>
-                            </label>
-                          ))
-                        ) : (
-                          <p className="text-xs text-gray-500">No CTAs available</p>
                         )}
                       </div>
                     </div>
@@ -2361,17 +2362,8 @@ const AdsetEditor = () => {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {combinations.map((combination) => {
-                      // Build ad body: hook + body + CTA
-                      let adBody = '';
-                      if (combination.hookId?.content) {
-                        adBody += combination.hookId.content + '\n\n';
-                      }
-                      if (combination.bodyId?.content) {
-                        adBody += combination.bodyId.content;
-                      }
-                      if (combination.ctaId?.content) {
-                        adBody += '\n\n' + combination.ctaId.content;
-                      }
+                      // Build ad body
+                      const adBody = combination.bodyId?.content || '';
 
                       const asset = combination.assetIds?.[0];
                       const isSelected = selectedCombinations.has(combination._id);
@@ -2790,10 +2782,14 @@ const AdsetEditor = () => {
                   style={{ maxHeight: 'calc(80vh - 120px)' }}
                 />
               ) : (
-                <div className="text-center text-gray-500">
-                  <p>Video preview not available</p>
-                  <p className="text-sm mt-2">{previewAsset.filename}</p>
-                </div>
+                <video
+                  src={`${API_URL}${previewAsset.url}`}
+                  controls
+                  className="h-full w-auto max-w-full object-contain"
+                  style={{ maxHeight: 'calc(80vh - 120px)' }}
+                >
+                  Your browser does not support the video tag.
+                </video>
               )}
             </div>
             {previewAsset.metadata && (

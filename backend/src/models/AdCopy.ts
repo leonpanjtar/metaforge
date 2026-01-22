@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IAdCopy extends Document {
   adsetId: mongoose.Types.ObjectId;
-  type: 'headline' | 'body' | 'description' | 'cta' | 'hook';
+  type: 'headline' | 'body' | 'description';
   content: string;
   variantIndex: number;
   generatedByAI: boolean;
@@ -20,7 +20,7 @@ const AdCopySchema = new Schema<IAdCopy>(
     },
     type: {
       type: String,
-      enum: ['headline', 'body', 'description', 'cta', 'hook'],
+      enum: ['headline', 'body', 'description'],
       required: true,
     },
     content: {
