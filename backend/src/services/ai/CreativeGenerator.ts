@@ -303,15 +303,9 @@ Return your analysis as JSON with these fields:
   }> {
     try {
       // Step 1: Analyze the image
-      console.log('[CreativeGenerator] Starting image analysis...');
       let analysis;
       try {
         analysis = await this.analyzeImageForVariations(imageBuffer, userInstructions);
-        console.log('[CreativeGenerator] Image analysis completed:', {
-          description: analysis.description?.substring(0, 100),
-          style: analysis.style,
-          aspectRatio: analysis.aspectRatio
-        });
       } catch (error: any) {
         console.error('[CreativeGenerator] Image analysis failed:', error);
         throw new Error(`Image analysis failed: ${error.message || 'Unknown error'}`);
@@ -416,7 +410,6 @@ Return your analysis as JSON with these fields:
       
       for (let i = 0; i < variationPrompts.length; i++) {
         try {
-          console.log(`[CreativeGenerator] Generating variation ${i + 1}/${variationPrompts.length}...`);
           
           // Use Responses API with gpt-image-1 model, with fallback to DALL-E 3
           let base64Image: string | null = null;
@@ -469,7 +462,6 @@ Return your analysis as JSON with these fields:
             }
           } catch (apiError: any) {
             // If responses API fails or doesn't exist, try direct HTTP call
-            console.log(`[CreativeGenerator] Trying direct API call for gpt-image-1...`);
             try {
               const axios = require('axios');
               const apiKey = process.env.OPENAI_API_KEY;
@@ -532,12 +524,9 @@ Return your analysis as JSON with these fields:
               
               // If 400/404 error or API not available, mark for DALL-E 3 fallback
               if (errorStatus === 400 || errorStatus === 404 || errorStatus === 422) {
-                console.log(`[CreativeGenerator] gpt-image-1 API returned ${errorStatus}, falling back to DALL-E 3...`);
-                console.log(`[CreativeGenerator] Error details: ${JSON.stringify(httpError.response?.data, null, 2)}`);
                 useDalle3Fallback = true;
               } else {
                 // For other errors, still try DALL-E 3 as fallback
-                console.log(`[CreativeGenerator] gpt-image-1 API error (${errorStatus}), will try DALL-E 3 fallback...`);
                 useDalle3Fallback = true;
               }
             }
@@ -546,7 +535,6 @@ Return your analysis as JSON with these fields:
           // Fallback to DALL-E 3 if gpt-image-1 fails or is not available
           if (!base64Image || useDalle3Fallback) {
             try {
-              console.log(`[CreativeGenerator] Using DALL-E 3 HD for variation ${i + 1}...`);
               
               // Enhance prompt for DALL-E 3 with even more specific instructions
               let dallePrompt = variationPrompts[i];
@@ -573,7 +561,6 @@ Return your analysis as JSON with these fields:
                 });
                 const buffer = Buffer.from(imageResponse.data, 'binary');
                 base64Image = buffer.toString('base64');
-                console.log(`[CreativeGenerator] DALL-E 3 successful for variation ${i + 1}`);
               }
             } catch (dalleError: any) {
               throw new Error(`Both gpt-image-1 and DALL-E 3 failed. DALL-E 3 error: ${dalleError.message}`);
@@ -584,7 +571,6 @@ Return your analysis as JSON with these fields:
             // Convert base64 to data URL for consistency with existing download logic
             const dataUrl = `data:image/png;base64,${base64Image}`;
             imageUrls.push(dataUrl);
-            console.log(`[CreativeGenerator] Variation ${i + 1} generated successfully`);
           } else {
             const errorMsg = `Variation ${i + 1}: No image in response`;
             console.error(`[CreativeGenerator] ${errorMsg}`);
@@ -613,7 +599,6 @@ Return your analysis as JSON with these fields:
         throw new Error(`All variations failed to generate. Errors: ${errors.join('; ')}`);
       }
       
-      console.log(`[CreativeGenerator] Successfully generated ${imageUrls.length}/${variationPrompts.length} variations`);
 
       return {
         imageUrls,

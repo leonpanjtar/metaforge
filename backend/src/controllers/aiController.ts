@@ -89,7 +89,6 @@ export const generateImageFromPrompt = async (req: AuthRequest, res: Response): 
 
     for (let i = 0; i < count; i++) {
       try {
-        console.log(`[generateImageFromPrompt] Generating image ${i + 1}/${count}...`);
         const imageUrl = await creativeGenerator.generateImage(prompt, size as '1024x1024' | '1792x1024' | '1024x1792');
 
         if (!imageUrl) {
@@ -140,8 +139,6 @@ export const generateImageFromPrompt = async (req: AuthRequest, res: Response): 
 
         await asset.save();
         savedAssets.push(asset);
-        
-        console.log(`[generateImageFromPrompt] Saved asset: ${filename}`);
       } catch (error: any) {
         console.error(`[generateImageFromPrompt] Failed to generate/save image ${i + 1}:`, error.message);
         // Continue with other images even if one fails
@@ -451,7 +448,6 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
             total: variantCount
           });
 
-          console.log(`[generateImageVariationsWithOpenAI] Saved asset: ${filename}`);
         } catch (error: any) {
           console.error(`[generateImageVariationsWithOpenAI] Failed to generate variation ${i + 1}:`, error.message);
           errors.push(`Variation ${i + 1}: ${error.message}`);
@@ -758,25 +754,10 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
         'http://localhost:3001';
       const imageUrl = `${baseUrl}${asset.url}`;
       
-      console.log('[generateVariantsFromAsset] Environment check:', {
-        PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL,
-        API_URL: process.env.API_URL,
-        baseUrl,
-        assetUrl: asset.url,
-        imageUrl,
-      });
-      
       // Check if URL is publicly accessible (not localhost)
       const isLocalhost =
         imageUrl.includes('localhost') ||
         imageUrl.includes('127.0.0.1');
-      
-      console.log('[generateVariantsFromAsset] Localhost check:', {
-        isLocalhost,
-        imageUrl,
-        containsLocalhost: imageUrl.includes('localhost'),
-        contains127: imageUrl.includes('127.0.0.1'),
-      });
       
       if (isLocalhost) {
         // For localhost, we can't upload to Facebook, but we can still proceed
@@ -785,7 +766,6 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
         
         // Try to upload anyway - it will fail, but we'll handle it gracefully
         try {
-          console.log('[generateVariantsFromAsset] Attempting localhost upload (expected to fail)');
           imageHash = await apiService.uploadAdImage(
             `act_${facebookAccount.accountId}`,
             imageUrl
@@ -818,10 +798,6 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
       } else {
         // URL is publicly accessible, try to upload
         try {
-          console.log('[generateVariantsFromAsset] Attempting public upload', {
-            accountId: `act_${facebookAccount.accountId}`,
-            imageUrl,
-          });
           imageHash = await apiService.uploadAdImage(
             `act_${facebookAccount.accountId}`,
             imageUrl
@@ -988,7 +964,6 @@ export const downloadImageFromPreview = async (req: AuthRequest, res: Response):
       return;
     }
 
-    console.log('[downloadImageFromPreview] Extracted preview URL:', previewUrl);
 
     // Fetch the preview page HTML
     const previewResponse = await axios.get(previewUrl, {
@@ -1042,7 +1017,6 @@ export const downloadImageFromPreview = async (req: AuthRequest, res: Response):
       return;
     }
 
-    console.log(`[downloadImageFromPreview] Found ${imageUrls.size} image URLs to download`);
 
     const fileStorageService = new FileStorageService();
     const savedAssets = [];
@@ -1050,7 +1024,6 @@ export const downloadImageFromPreview = async (req: AuthRequest, res: Response):
     // Download and save each image
     for (const imageUrl of Array.from(imageUrls)) {
       try {
-        console.log(`[downloadImageFromPreview] Downloading: ${imageUrl}`);
         
         // Download image
         const imageResponse = await axios.get(imageUrl, {
@@ -1098,8 +1071,6 @@ export const downloadImageFromPreview = async (req: AuthRequest, res: Response):
 
         await asset.save();
         savedAssets.push(asset);
-        
-        console.log(`[downloadImageFromPreview] Saved asset: ${filename}`);
       } catch (error: any) {
         console.error(`[downloadImageFromPreview] Failed to download ${imageUrl}:`, error.message);
         // Continue with other images even if one fails

@@ -51,7 +51,6 @@ export const getAccountUserIds = async (req: AuthRequest): Promise<string[]> => 
       // Get all user IDs in this account
       const memberships = await UserAccount.find({ accountId });
       const userIds = memberships.map(m => m.userId.toString());
-      console.log(`[getAccountUserIds] Found ${userIds.length} users in account ${accountId}:`, userIds);
       return userIds;
     } catch (error: any) {
       console.warn(`[getAccountUserIds] Error getting account user IDs, falling back to userId only:`, error.message);
@@ -60,7 +59,6 @@ export const getAccountUserIds = async (req: AuthRequest): Promise<string[]> => 
   }
 
   // Fallback to current user only (backward compatibility)
-  console.log(`[getAccountUserIds] No accountId header, returning userId only:`, req.userId);
   return [req.userId!];
 };
 

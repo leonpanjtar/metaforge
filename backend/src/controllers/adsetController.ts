@@ -74,45 +74,24 @@ export const getAdsets = async (req: AuthRequest, res: Response): Promise<void> 
     // Query by accountId if available, otherwise fallback to userId for backward compatibility
     if (accountFilter.accountId) {
       query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
-      console.log(`[getAdsets] Querying by accountId:`, accountFilter.accountId);
     } else {
       // Fallback to userId for backward compatibility
       query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
-      console.log(`[getAdsets] Querying by userId (fallback):`, accountFilter.userId);
     }
     
     if (campaignId) {
       // Convert campaignId string to ObjectId
       try {
         query.campaignId = new mongoose.Types.ObjectId(campaignId as string);
-        console.log(`[getAdsets] Filtering by campaignId:`, campaignId);
       } catch (error) {
         res.status(400).json({ error: 'Invalid campaignId format' });
         return;
       }
     }
 
-    console.log(`[getAdsets] Final query:`, JSON.stringify({
-      ...query,
-      accountId: query.accountId ? query.accountId.toString() : undefined,
-      userId: query.userId ? query.userId.toString() : undefined,
-      campaignId: query.campaignId ? query.campaignId.toString() : undefined
-    }, null, 2));
-
     const adsets = await Adset.find(query)
       .populate('campaignId', 'name')
       .sort({ createdAt: -1 });
-
-    console.log(`[getAdsets] Found ${adsets.length} adsets`);
-    if (adsets.length > 0) {
-      console.log(`[getAdsets] Sample adset:`, {
-        _id: adsets[0]._id,
-        name: adsets[0].name,
-        userId: adsets[0].userId,
-        accountId: adsets[0].accountId,
-        campaignId: adsets[0].campaignId
-      });
-    }
 
     res.json(adsets);
   } catch (error: any) {
@@ -231,8 +210,6 @@ export const updateAdset = async (req: AuthRequest, res: Response): Promise<void
         return;
       }
       
-      console.log('Received contentData update:', JSON.stringify(updates.contentData, null, 2));
-      
       // Merge contentData - explicitly set all fields to ensure they're saved
       const existingContentData = adset.contentData || {};
       const newContentData: any = {
@@ -259,8 +236,6 @@ export const updateAdset = async (req: AuthRequest, res: Response): Promise<void
           : String(existingContentData.facebookPageName || ''),
       };
       
-      console.log('Merged contentData:', JSON.stringify(newContentData, null, 2));
-      
       // Remove contentData from updates to avoid overwriting
       delete updates.contentData;
       
@@ -282,8 +257,6 @@ export const updateAdset = async (req: AuthRequest, res: Response): Promise<void
         res.status(404).json({ error: 'Adset not found after update' });
         return;
       }
-      
-      console.log('Saved adset contentData:', JSON.stringify(updatedAdset.contentData, null, 2));
       
       res.json(updatedAdset);
     } else {

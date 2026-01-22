@@ -292,13 +292,7 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
 
     if (!shouldForceRefresh && cache && now - cache.updatedAt.getTime() < ONE_HOUR_MS) {
       results = cache.ads;
-      console.log('[getWinningAds] Returning cached winning ads');
     } else {
-      if (shouldForceRefresh) {
-        console.log('[getWinningAds] Force refresh requested; fetching from Facebook');
-      } else {
-        console.log('[getWinningAds] Cache miss or stale; fetching from Facebook');
-      }
 
       const apiService = new FacebookApiService(facebookAccount.accessToken);
       const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
@@ -316,22 +310,6 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       // STEP 2–4: For each lead campaign, get INSIGHTS at AD level (far fewer calls, avoids rate limits)
       for (const campaign of leadCampaigns) {
         try {
-          const timeRange = JSON.stringify(dateRange);
-          console.log(
-            `[getWinningAds][GraphExplorer] Campaign-level insights for campaign ${campaign.id}:`,
-            {
-              endpoint: `https://graph.facebook.com/v24.0/${campaign.id}/insights`,
-              method: 'GET',
-              params: {
-                level: 'ad',
-                fields:
-                  'ad_id,ad_name,adset_id,adset_name,campaign_name,impressions,clicks,ctr,spend,actions,results,objective_results,cost_per_result,result_values_performance_indicator,result_rate',
-                time_range: timeRange,
-                access_token: '<ACCESS_TOKEN>',
-              },
-            }
-          );
-
           const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange);
 
           for (const row of rows) {
@@ -347,28 +325,6 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
               : (schedules > 0 ? spend / schedules : 0);
             const conversionRate = schedulesData.conversionRate;
             const conversionEvents = extractConversionEvents(row);
-            
-            // Debug logging for conversion events
-            if (conversionEvents.length > 0) {
-              console.log(`[getWinningAds] Ad ${adId} conversion events:`, conversionEvents.map(e => `${e.actionType}: ${e.value}`).join(', '));
-            }
-            // Log performance indicator and results for debugging schedules
-            if (row.result_values_performance_indicator) {
-              console.log(`[getWinningAds] Ad ${adId} performance indicator:`, row.result_values_performance_indicator);
-            }
-            if (row.results && Array.isArray(row.results)) {
-              console.log(`[getWinningAds] Ad ${adId} results array:`, JSON.stringify(row.results, null, 2));
-            }
-            if (schedules > 0) {
-              console.log(`[getWinningAds] Ad ${adId} schedules: ${schedules}, cost per schedule: ${costPerSchedule.toFixed(2)}, conversion rate: ${(conversionRate * 100).toFixed(2)}%`);
-            }
-            // Log all actions for debugging
-            if (row.actions && Array.isArray(row.actions)) {
-              const allActionTypes = row.actions.map((a: any) => a.action_type).filter(Boolean);
-              if (allActionTypes.length > 0) {
-                console.log(`[getWinningAds] Ad ${adId} all action types:`, allActionTypes.join(', '));
-              }
-            }
 
             const accountIdNumeric = facebookAccount.accountId.startsWith('act_')
               ? facebookAccount.accountId.replace('act_', '')
@@ -572,8 +528,6 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
     // Note: This works for any ad in the account, not just ads created through the app
     const adDetails = await apiService.getAdDetails(facebookAdId);
     
-    console.log('[getAdDetails] Ad details from API:', JSON.stringify(adDetails, null, 2));
-    
     // Get adset targeting
     const adsetDetails = await apiService.getAdsetDetails(adDetails.adset_id);
     
@@ -619,7 +573,6 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
       if (creativeId) {
         try {
           const creativeDetails = await apiService.getAdCreativeDetails(creativeId);
-          console.log('[getAdDetails] Creative details from API:', JSON.stringify(creativeDetails, null, 2));
           
           const fallbackObjectStorySpec = creativeDetails.object_story_spec;
           if (fallbackObjectStorySpec) {
@@ -677,8 +630,6 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
         placements: adsetDetails.targeting?.publisher_platforms || [],
       },
     };
-    
-    console.log('[getAdDetails] Final response:', JSON.stringify(details, null, 2));
 
     res.json(details);
   } catch (error: any) {

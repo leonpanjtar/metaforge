@@ -81,8 +81,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
     const sinceStr = since.toISOString().split('T')[0]; // YYYY-MM-DD
     const untilStr = until.toISOString().split('T')[0]; // YYYY-MM-DD
 
-    console.log(`[getDashboardStats] Fetching stats for user ${req.userId}, date range: ${sinceStr} to ${untilStr}`);
-
     // Get all active Facebook accounts for all users in the account
     const { getAccountUserIds } = await import('../utils/accountFilter');
     const accountUserIds = await getAccountUserIds(req);
@@ -92,10 +90,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       isActive: true,
     });
 
-    console.log(`[getDashboardStats] Found ${facebookAccounts.length} active Facebook accounts`);
-
     if (facebookAccounts.length === 0) {
-      console.log(`[getDashboardStats] No active Facebook accounts found for user ${req.userId}`);
       res.json({
         totalLeads: 0,
         totalSpend: 0,
@@ -134,13 +129,10 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         const cacheAge = now - cache.updatedAt.getTime();
         return cacheAge < ONE_HOUR_MS;
       });
-    } else {
-      console.log(`[getDashboardStats] Force refresh requested, bypassing cache`);
     }
 
     // If we have valid cache for all accounts and not forcing refresh, return cached data
     if (!forceRefresh && validCaches.length === facebookAccounts.length && validCaches.length > 0) {
-      console.log(`[getDashboardStats] Using cached data (${validCaches.length} valid caches)`);
       
       // Aggregate cached data
       let totalLeads = 0;
@@ -188,7 +180,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         }));
 
       const hasData = totalLeads > 0 || totalSpend > 0;
-      console.log(`[getDashboardStats] Cached data - Total Leads: ${totalLeads}, Total Spend: ${totalSpend}, Has Data: ${hasData}`);
 
       res.json({
         totalLeads: Math.round(totalLeads),
@@ -201,8 +192,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       });
       return;
     }
-
-    console.log(`[getDashboardStats] Cache is stale or missing, fetching live data`);
 
     // Cache is stale or missing, fetch live data and cache it
     const dateRange = { since: sinceStr, until: untilStr };
@@ -237,7 +226,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       const leadCampaigns = campaigns.filter(
         (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
       );
-      console.log(`[getDashboardStats] Account ${facebookAccount.accountId}: Found ${leadCampaigns.length} OUTCOME_LEADS campaigns out of ${campaigns.length} total`);
 
       // Per-account stats
       let accountLeads = 0;
@@ -257,15 +245,11 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       // We'll extract schedule_website conversions from all ads
       for (const campaign of leadCampaigns) {
           try {
-            console.log(`[getDashboardStats] Fetching insights for campaign ${campaign.id} (${campaign.name})`);
-            
             // Use time_increment=1 to get daily breakdown (Facebook API requires number, not 'day')
             const rows = await apiService.getCampaignAdInsights(campaign.id, dateRange, '1');
-            console.log(`[getDashboardStats] Campaign ${campaign.id}: Got ${rows.length} insight rows`);
 
             // Skip campaigns with no activity in the date range
             if (rows.length === 0) {
-              console.log(`[getDashboardStats] Campaign ${campaign.id} has no insights in the past 30 days, skipping`);
               continue;
             }
 
@@ -277,7 +261,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
             });
 
             if (!hasActivity) {
-              console.log(`[getDashboardStats] Campaign ${campaign.id} has no activity (spend/impressions) in the past 30 days, skipping`);
               continue;
             }
 
@@ -294,7 +277,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
 
               // Only count rows that have schedule_website conversions
               if (schedules > 0) {
-                console.log(`[getDashboardStats] ✓ Found ${schedules} schedules for ${dateStr}, Ad ${adId}, Spend: $${spend.toFixed(2)}`);
 
                 // Add to account totals
                 accountLeads += schedules;
@@ -400,8 +382,6 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       }));
 
     const hasData = totalLeads > 0 || totalSpend > 0;
-    console.log(`[getDashboardStats] Live data - Total Leads: ${totalLeads}, Total Spend: ${totalSpend}, Has Data: ${hasData}`);
-    console.log(`[getDashboardStats] Daily stats count: ${dailyStats.length}, Days with data: ${dailyStats.filter(d => d.leads > 0 || d.spend > 0).length}`);
 
     res.json({
       totalLeads: Math.round(totalLeads),

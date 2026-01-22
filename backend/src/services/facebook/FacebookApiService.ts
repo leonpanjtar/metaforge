@@ -66,20 +66,9 @@ export class FacebookApiService {
         }
       );
 
-      const data = debugResponse.data?.data;
-      console.log('[FacebookApiService.debugToken] Token info:', {
-        app_id: data?.app_id,
-        type: data?.type,
-        is_valid: data?.is_valid,
-        scopes: data?.scopes,
-        expires_at: data?.expires_at,
-        user_id: data?.user_id,
-      });
+      // Token debug info available in data if needed
     } catch (err: any) {
-      console.warn(
-        '[FacebookApiService.debugToken] Failed to debug token:',
-        err.response?.data || err.message
-      );
+      // Silently fail token debugging
     }
   }
 
@@ -241,16 +230,8 @@ export class FacebookApiService {
 
   async createAdset(accountId: string, adsetData: any): Promise<string> {
     try {
-      console.log('[FacebookApiService.createAdset] Request:', {
-        accountId,
-        adsetData: JSON.stringify(adsetData, null, 2),
-      });
       const response = await this.api.post(`/${accountId}/adsets`, adsetData);
       const adsetId = response.data.id;
-      console.log('[FacebookApiService.createAdset] Success:', {
-        adsetId,
-        response: response.data,
-      });
       
       // Verify the adset was created successfully
       if (!adsetId) {
@@ -277,13 +258,8 @@ export class FacebookApiService {
   async uploadAdImage(accountId: string, imageUrl: string): Promise<string> {
     try {
       await this.logTokenScopesIfDev();
-      console.log('[FacebookApiService.uploadAdImage] Request', {
-        accountId,
-        imageUrl,
-      });
       
       // Fetch the image from the URL and convert to base64 (API v24.0 requires bytes parameter)
-      console.log('[FacebookApiService.uploadAdImage] Fetching image from URL...');
       const imageResponse = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
         timeout: 30000, // 30 second timeout
@@ -292,14 +268,10 @@ export class FacebookApiService {
       const imageBuffer = Buffer.from(imageResponse.data);
       const base64Image = imageBuffer.toString('base64');
       
-      console.log('[FacebookApiService.uploadAdImage] Image fetched, size:', imageBuffer.length, 'bytes');
-      
       // Upload using bytes parameter (API v24.0)
       const response = await this.api.post(`/${accountId}/adimages`, {
         bytes: base64Image,
       });
-      
-      console.log('[FacebookApiService.uploadAdImage] Response data', response.data);
       
       // Response format: { images: { <hash>: { hash: "...", url: "...", ... } } }
       if (response.data.images) {
@@ -358,10 +330,6 @@ export class FacebookApiService {
       });
       const response = await this.api.post(`/${accountId}/adcreatives`, creativeData);
       const creativeId = response.data.id;
-      console.log('[FacebookApiService.createAdCreative] Success:', {
-        creativeId,
-        response: response.data,
-      });
       if (!creativeId) {
         throw new Error('Ad creative creation succeeded but no ID was returned');
       }
@@ -384,10 +352,6 @@ export class FacebookApiService {
 
   async createAd(accountId: string, adData: any): Promise<string> {
     try {
-      console.log('[FacebookApiService.createAd] Request:', {
-        accountId,
-        adData: JSON.stringify(adData, null, 2),
-      });
       const response = await this.api.post(`/${accountId}/ads`, adData);
       return response.data.id;
     } catch (error: any) {

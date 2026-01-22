@@ -90,7 +90,6 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
       (c) => typeof c.objective === 'string' && c.objective.toUpperCase() === 'OUTCOME_LEADS'
     );
 
-    console.log(`[dashboardCacheJob] Account ${accountIdWithPrefix}: Found ${leadCampaigns.length} OUTCOME_LEADS campaigns out of ${campaigns.length} total`);
 
     // Aggregate stats
     let totalLeads = 0;
@@ -114,7 +113,6 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
 
         // Skip campaigns with no activity in the date range
         if (rows.length === 0) {
-          console.log(`[dashboardCacheJob] Campaign ${campaign.id} has no insights in the past 30 days, skipping`);
           continue;
         }
 
@@ -126,7 +124,6 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
         });
 
         if (!hasActivity) {
-          console.log(`[dashboardCacheJob] Campaign ${campaign.id} has no activity (spend/impressions) in the past 30 days, skipping`);
           continue;
         }
 
@@ -196,9 +193,6 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
       { upsert: true, new: true }
     );
 
-    console.log(
-      `[dashboardCacheJob] Cached dashboard stats for user ${facebookAccount.userId}, account ${facebookAccount.accountId}`
-    );
   } catch (error: any) {
     console.error(
       `[dashboardCacheJob] Failed to cache dashboard stats for account ${facebookAccount.accountId}:`,
@@ -210,25 +204,17 @@ async function fetchAndCacheDashboardStats(facebookAccount: any) {
 export const startDashboardCacheJob = () => {
   // Run every hour at minute 0 (e.g., 1:00, 2:00, 3:00, etc.)
   cron.schedule('0 * * * *', async () => {
-    console.log('[dashboardCacheJob] Starting hourly dashboard cache refresh...');
-
     try {
       // Get all active Facebook accounts
       const facebookAccounts = await FacebookAccount.find({ isActive: true });
-
-      console.log(`[dashboardCacheJob] Found ${facebookAccounts.length} active Facebook accounts to cache`);
 
       // Cache stats for each account
       for (const account of facebookAccounts) {
         await fetchAndCacheDashboardStats(account);
       }
-
-      console.log('[dashboardCacheJob] Hourly dashboard cache refresh completed');
     } catch (error: any) {
       console.error('[dashboardCacheJob] Dashboard cache job error:', error.message);
     }
   });
-
-  console.log('[dashboardCacheJob] Dashboard cache job scheduled (every hour at :00)');
 };
 

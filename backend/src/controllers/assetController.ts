@@ -168,7 +168,6 @@ export const deleteAsset = async (req: AuthRequest, res: Response): Promise<void
       assetIds: id,
     });
 
-    console.log(`[deleteAsset] Deleted ${deletedCombinations.deletedCount} combination(s) referencing asset ${id}`);
 
     // Delete the asset file from filesystem
     await fileStorageService.deleteFile(asset.filepath);
