@@ -549,65 +549,123 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
   try {
     const { facebookAdId } = req.params;
 
-    // Find the combination to get the adset and account info
-    const combination = await AdCombination.findOne({ facebookAdId }).populate('adsetId');
-    if (!combination) {
-      res.status(404).json({ error: 'Ad not found' });
-      return;
-    }
-
-    const adset = await Adset.findById((combination.adsetId as any)._id).populate('campaignId');
-    if (!adset || (adset.userId as any).toString() !== req.userId) {
-      res.status(404).json({ error: 'Adset not found or access denied' });
-      return;
-    }
-
-    const campaign: any = adset.campaignId;
-    const facebookAccount = await FacebookAccount.findById(campaign.facebookAccountId);
+    // Find an active Facebook account for any user in the account
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+    
+    const facebookAccount =
+      (await FacebookAccount.findOne({ userId: { $in: accountUserObjectIds }, isActive: true })) ||
+      (await FacebookAccount.findOne({ userId: { $in: accountUserObjectIds } }));
+    
     if (!facebookAccount) {
       res.status(404).json({ error: 'Facebook account not found' });
       return;
     }
 
+    // Check and refresh token if needed
+    const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
+    await TokenRefreshService.checkAndRefreshToken(facebookAccount);
+
     const apiService = new FacebookApiService(facebookAccount.accessToken);
 
-    // Get ad details
+    // Get ad details directly from Facebook API
+    // Note: This works for any ad in the account, not just ads created through the app
     const adDetails = await apiService.getAdDetails(facebookAdId);
     
-    // Extract creative ID from ad details
-    const creativeId = adDetails.creative?.id;
-    if (!creativeId) {
-      res.status(400).json({ error: 'Creative ID not found in ad details' });
-      return;
-    }
-
-    // Get creative details
-    const creativeDetails = await apiService.getAdCreativeDetails(creativeId);
+    console.log('[getAdDetails] Ad details from API:', JSON.stringify(adDetails, null, 2));
     
     // Get adset targeting
     const adsetDetails = await apiService.getAdsetDetails(adDetails.adset_id);
+    
+    // Initialize creative data with defaults
+    let headline = '';
+    let body = '';
+    let description = '';
+    let ctaButton = 'LEARN_MORE';
+    let imageHash: string | null = null;
+    let imageUrl: string | null = null;
+    let link = '';
 
-    // Extract creative content from object_story_spec
-    const objectStorySpec = creativeDetails.object_story_spec;
-    const linkData = objectStorySpec?.link_data || {};
+    // Extract data from object_story_spec (it's already included in ad details response)
+    const objectStorySpec = adDetails.creative?.object_story_spec;
     
-    // Extract CTA type
-    const ctaType = linkData.call_to_action?.type || 'LEARN_MORE';
-    
-    // Extract image hash/URL
-    const imageHash = linkData.image_hash;
-    const imageUrl = imageHash ? `https://graph.facebook.com/v24.0/${imageHash}` : null;
+    if (objectStorySpec) {
+      const linkData = objectStorySpec.link_data || {};
+      const videoData = objectStorySpec.video_data || {};
+      
+      // Link ad format
+      if (linkData && Object.keys(linkData).length > 0) {
+        headline = linkData.name || '';
+        body = linkData.message || '';
+        description = linkData.description || '';
+        link = linkData.link || '';
+        if (linkData.image_hash) imageHash = linkData.image_hash;
+        if (linkData.call_to_action?.type) ctaButton = linkData.call_to_action.type;
+      }
+      
+      // Video ad format
+      if (videoData && Object.keys(videoData).length > 0) {
+        headline = videoData.title || videoData.name || '';
+        body = videoData.message || '';
+        description = videoData.description || '';
+        link = videoData.call_to_action?.value?.link || '';
+        if (videoData.image_url) imageUrl = videoData.image_url;
+        if (videoData.image_hash) imageHash = videoData.image_hash;
+        if (videoData.call_to_action?.type) ctaButton = videoData.call_to_action.type;
+      }
+    } else {
+      // Fallback: try to fetch creative details if object_story_spec is not in ad details
+      const creativeId = adDetails.creative?.id;
+      if (creativeId) {
+        try {
+          const creativeDetails = await apiService.getAdCreativeDetails(creativeId);
+          console.log('[getAdDetails] Creative details from API:', JSON.stringify(creativeDetails, null, 2));
+          
+          const fallbackObjectStorySpec = creativeDetails.object_story_spec;
+          if (fallbackObjectStorySpec) {
+            const linkData = fallbackObjectStorySpec.link_data || {};
+            const videoData = fallbackObjectStorySpec.video_data || {};
+            
+            if (linkData && Object.keys(linkData).length > 0) {
+              headline = linkData.name || '';
+              body = linkData.message || '';
+              description = linkData.description || '';
+              link = linkData.link || '';
+              if (linkData.image_hash) imageHash = linkData.image_hash;
+              if (linkData.call_to_action?.type) ctaButton = linkData.call_to_action.type;
+            }
+            
+            if (videoData && Object.keys(videoData).length > 0) {
+              headline = videoData.title || videoData.name || '';
+              body = videoData.message || '';
+              description = videoData.description || '';
+              link = videoData.call_to_action?.value?.link || '';
+              if (videoData.image_url) imageUrl = videoData.image_url;
+              if (videoData.image_hash) imageHash = videoData.image_hash;
+              if (videoData.call_to_action?.type) ctaButton = videoData.call_to_action.type;
+            }
+          }
+        } catch (creativeError: any) {
+          console.warn('[getAdDetails] Failed to fetch creative details (non-critical):', creativeError.message);
+        }
+      }
+    }
+
+    // Build image URL from hash if we have hash but no URL
+    if (imageHash && !imageUrl) {
+      imageUrl = `https://graph.facebook.com/v24.0/${imageHash}`;
+    }
 
     // Build response
     const details = {
       creative: {
-        headline: linkData.name || '',
-        body: linkData.message || '',
-        description: linkData.description || '',
-        ctaButton: ctaType,
+        headline,
+        body,
+        description,
+        ctaButton,
         imageHash,
         imageUrl,
-        link: linkData.link || '',
+        link,
       },
       adsetTargeting: {
         ageMin: adsetDetails.targeting?.age_min,
@@ -619,6 +677,8 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
         placements: adsetDetails.targeting?.publisher_platforms || [],
       },
     };
+    
+    console.log('[getAdDetails] Final response:', JSON.stringify(details, null, 2));
 
     res.json(details);
   } catch (error: any) {

@@ -430,7 +430,7 @@ export class FacebookApiService {
     try {
       const response = await this.api.get(`/${adId}`, {
         params: {
-          fields: 'id,name,status,adset_id,creative{object_story_spec}',
+          fields: 'id,name,status,adset_id,creative{id,object_story_spec}',
         },
       });
       return response.data;
