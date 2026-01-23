@@ -14,6 +14,11 @@ import {
   generateContentVariant,
   generateContentData,
 } from '../controllers/aiController';
+import {
+  getPrompts,
+  testPrompt,
+  testImagePrompt,
+} from '../controllers/promptTesterController';
 import { authenticate } from '../middleware/auth';
 import multer from 'multer';
 
@@ -34,6 +39,11 @@ router.post('/analyze-creative', authenticate, analyzeCreative);
 router.post('/download-image-from-preview', authenticate, downloadImageFromPreview);
 router.post('/generate-content-variant', authenticate, generateContentVariant);
 router.post('/generate-content-data', authenticate, generateContentData);
+
+// Prompt tester routes (admin only)
+router.get('/prompt-tester/prompts', authenticate, getPrompts);
+router.post('/prompt-tester/test', authenticate, testPrompt);
+router.post('/prompt-tester/test-image', authenticate, upload.single('image'), testImagePrompt);
 
 export default router;
 

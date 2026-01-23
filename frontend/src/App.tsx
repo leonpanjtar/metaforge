@@ -15,6 +15,7 @@ import WinningAds from './pages/WinningAds';
 import Performance from './pages/Performance';
 import AccountManagement from './pages/AccountManagement';
 import AcceptInvitation from './pages/AcceptInvitation';
+import PromptTester from './pages/PromptTester';
 import Layout from './components/Layout';
 
 const queryClient = new QueryClient();
@@ -61,6 +62,7 @@ function App() {
             <Route path="performance/:adsetId" element={<Performance />} />
             <Route path="winning-ads" element={<WinningAds />} />
             <Route path="account/:accountId" element={<AccountManagement />} />
+            <Route path="prompt-tester" element={<PromptTester />} />
           </Route>
         </Routes>
       </BrowserRouter>

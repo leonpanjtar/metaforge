@@ -25,6 +25,7 @@ const Layout = () => {
   const canManageUsers = currentAccount && (currentAccount.role === 'owner' || currentAccount.role === 'admin');
   if (canManageUsers && currentAccount) {
     navItems.push({ path: `/account/${currentAccount._id}`, label: 'User Management' });
+    navItems.push({ path: '/prompt-tester', label: 'Prompt Tester' });
   }
 
   // Close dropdowns when clicking outside
