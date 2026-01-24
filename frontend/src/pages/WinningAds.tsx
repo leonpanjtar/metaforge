@@ -93,8 +93,12 @@ const WinningAds = () => {
       const params: Record<string, string> = {};
       if (since) params.since = since;
       if (until) params.until = until;
+      // Always require forceRefresh to fetch data
       if (forceRefresh > 0) {
         params.forceRefresh = 'true';
+      } else {
+        // Return empty if no refresh requested
+        return { ads: [] };
       }
       const response = await api.get('/winning-ads', { params });
       return response.data;
