@@ -8,6 +8,7 @@ import { AdCombination } from '../models/AdCombination';
 import { Asset } from '../models/Asset';
 import { AdCopy } from '../models/AdCopy';
 import { getAccountFilter } from '../utils/accountFilter';
+import { WinningAdsCache } from '../models/WinningAdsCache';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs/promises';
@@ -271,26 +272,40 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    // Only fetch data when forceRefresh is explicitly requested
+    // Try cache first (valid for 1 hour), unless forceRefresh is true
     const shouldForceRefresh = forceRefresh === 'true' || forceRefresh === true;
+    let cache = null;
     
     if (!shouldForceRefresh) {
-      // Return empty array if refresh button wasn't clicked
-      res.json({ ads: [] });
-      return;
+      cache = await WinningAdsCache.findOne({
+        userId: req.userId,
+        facebookAccountId: facebookAccount._id,
+        since: sinceStr,
+        until: untilStr,
+      });
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
-    const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
-      ? facebookAccount.accountId
-      : `act_${facebookAccount.accountId}`;
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const now = Date.now();
 
     let results: any[] = [];
 
-    // Use account-level insights API with action_type=schedule_website filter
-    // This is the correct way to fetch winning ads data
-    try {
-      const rows = await apiService.getAccountAdInsights(accountIdWithPrefix, dateRange);
+    if (!shouldForceRefresh && cache && now - cache.updatedAt.getTime() < ONE_HOUR_MS) {
+      // Use cached data if available and fresh
+      results = cache.ads;
+    } else {
+      // Fetch fresh data from Facebook API
+      const apiService = new FacebookApiService(facebookAccount.accessToken);
+      const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
+        ? facebookAccount.accountId
+        : `act_${facebookAccount.accountId}`;
+
+      results = [];
+
+      // Use account-level insights API with action_type=schedule_website filter
+      // This is the correct way to fetch winning ads data
+      try {
+        const rows = await apiService.getAccountAdInsights(accountIdWithPrefix, dateRange);
 
         for (const row of rows) {
           const adId = row.ad_id;
@@ -374,9 +389,26 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
             });
           }
         }
-    } catch (error: any) {
-      console.error('[getWinningAds] Failed to fetch account insights:', error);
-      throw error;
+      } catch (error: any) {
+        console.error('[getWinningAds] Failed to fetch account insights:', error);
+        throw error;
+      }
+
+      // Save to cache after successful fetch
+      await WinningAdsCache.findOneAndUpdate(
+        {
+          userId: req.userId,
+          facebookAccountId: facebookAccount._id,
+          since: sinceStr,
+          until: untilStr,
+        },
+        {
+          $set: {
+            ads: results,
+          },
+        },
+        { upsert: true, new: true }
+      );
     }
 
     // Calculate relative scores for all ads (both fresh and cached)

@@ -93,12 +93,8 @@ const WinningAds = () => {
       const params: Record<string, string> = {};
       if (since) params.since = since;
       if (until) params.until = until;
-      // Always require forceRefresh to fetch data
       if (forceRefresh > 0) {
         params.forceRefresh = 'true';
-      } else {
-        // Return empty if no refresh requested
-        return { ads: [] };
       }
       const response = await api.get('/winning-ads', { params });
       return response.data;
@@ -175,9 +171,8 @@ const WinningAds = () => {
       return sorted;
     }
     
-    // Get top percentage
-    const percentage = quickFilter === 'top1' ? 0.01 : quickFilter === 'top5' ? 0.05 : 0.1;
-    const count = Math.max(1, Math.ceil(sorted.length * percentage));
+    // Get fixed number of top ads
+    const count = quickFilter === 'top1' ? 3 : quickFilter === 'top5' ? 5 : 10;
     
     return sorted.slice(0, count);
   })();
@@ -230,7 +225,7 @@ const WinningAds = () => {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              Top 1%
+              Top 3
             </button>
             <button
               onClick={() => setQuickFilter('top5')}
@@ -240,7 +235,7 @@ const WinningAds = () => {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              Top 5%
+              Top 5
             </button>
             <button
               onClick={() => setQuickFilter('top10')}
@@ -250,7 +245,7 @@ const WinningAds = () => {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              Top 10%
+              Top 10
             </button>
           </div>
           {quickFilter !== 'all' && (
