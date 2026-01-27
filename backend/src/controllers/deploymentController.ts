@@ -1,10 +1,12 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { AdCombination } from '../models/AdCombination';
 import { Adset } from '../models/Adset';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
 import { TokenRefreshService } from '../services/facebook/TokenRefreshService';
+import { getAccountFilter } from '../utils/accountFilter';
 
 export const deployAds = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -15,7 +17,24 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
-    const adset = await Adset.findById(adsetId).populate('campaignId');
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const adset = await Adset.findOne(adsetQuery).populate('campaignId');
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
       return;

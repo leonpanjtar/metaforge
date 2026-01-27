@@ -44,10 +44,24 @@ export const uploadAssets = async (
       return;
     }
 
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const adset = await Adset.findOne(adsetQuery);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -115,19 +129,23 @@ export const getAssets = async (req: AuthRequest, res: Response): Promise<void> 
     const { adsetId } = req.params;
 
     // Get account filter - query by accountId first, then fallback to userId
-    const { getAccountFilter } = await import('../utils/accountFilter');
     const accountFilter = await getAccountFilter(req);
     
-    const query: any = { _id: adsetId };
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+    
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
     
     if (accountFilter.accountId) {
-      query.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
     } else {
       // Fallback to userId for backward compatibility
-      query.userId = new mongoose.Types.ObjectId(accountFilter.userId);
+      adsetQuery.userId = { $in: accountUserObjectIds };
     }
 
-    const adset = await Adset.findOne(query);
+    const adset = await Adset.findOne(adsetQuery);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });

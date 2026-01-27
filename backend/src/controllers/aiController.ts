@@ -1,8 +1,10 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { LandingPageScraper } from '../services/ai/LandingPageScraper';
 import { CopyGenerator } from '../services/ai/CopyGenerator';
 import { AdCopy } from '../models/AdCopy';
+import { getAccountFilter } from '../utils/accountFilter';
 
 // Lazy initialization - only create when needed
 const getLandingPageScraper = () => new LandingPageScraper();
@@ -197,7 +199,24 @@ export const generateSingleImageVariation = async (req: AuthRequest, res: Respon
     const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
 
-    const adset = await Adset.findById(adsetId).populate('campaignId');
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const adset = await Adset.findOne(adsetQuery).populate('campaignId');
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
       return;
@@ -290,11 +309,25 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
     // @ts-ignore - image-size doesn't have TypeScript types
     const sizeOf = require('image-size');
 
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
     // Verify adset ownership
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    const adset = await Adset.findOne(adsetQuery);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -525,7 +558,24 @@ export const generateImageVariations = async (req: AuthRequest, res: Response): 
     const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
 
-    const adset = await Adset.findById(adsetId).populate('campaignId');
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const adset = await Adset.findOne(adsetQuery).populate('campaignId');
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
       return;
@@ -617,7 +667,24 @@ export const generateMetaAIPreviews = async (req: AuthRequest, res: Response): P
     const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
 
-    const adset = await Adset.findById(adsetId).populate('campaignId');
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const adset = await Adset.findOne(adsetQuery).populate('campaignId');
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
       return;
