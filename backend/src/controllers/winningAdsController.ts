@@ -289,16 +289,35 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
     const now = Date.now();
 
     let results: any[] = [];
+    let useCache = false;
 
     if (!shouldForceRefresh && cache && now - cache.updatedAt.getTime() < ONE_HOUR_MS) {
       // Use cached data if available and fresh
       results = cache.ads;
-    } else {
-      // Fetch fresh data from Facebook API
-      const apiService = new FacebookApiService(facebookAccount.accessToken);
-      const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
-        ? facebookAccount.accountId
-        : `act_${facebookAccount.accountId}`;
+      useCache = true;
+    }
+
+    // Fetch fresh data if forceRefresh or no valid cache
+    if (!useCache) {
+      // Check and refresh token if needed before making API calls
+      const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
+      await TokenRefreshService.checkAndRefreshToken(facebookAccount);
+      const updatedAccount = await FacebookAccount.findById(facebookAccount._id);
+      if (!updatedAccount) {
+        // If account was deleted, try to use cache as fallback
+        if (cache && cache.ads) {
+          results = cache.ads;
+          res.json({ ads: results });
+          return;
+        }
+        res.status(404).json({ error: 'Facebook account not found' });
+        return;
+      }
+
+      const apiService = new FacebookApiService(updatedAccount.accessToken);
+      const accountIdWithPrefix = updatedAccount.accountId.startsWith('act_')
+        ? updatedAccount.accountId
+        : `act_${updatedAccount.accountId}`;
 
       results = [];
 
@@ -307,69 +326,70 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
       try {
         const rows = await apiService.getAccountAdInsights(accountIdWithPrefix, dateRange);
 
-        for (const row of rows) {
-          const adId = row.ad_id;
-          const impressions = Number(row.impressions || 0);
-          const clicks = Number(row.clicks || 0);
-          const spend = Number(row.spend || 0);
-          
-          // Extract schedule_website conversions from actions array
-          // The API returns actions with action_type breakdown when action_breakdowns=action_type
-          let schedules = 0;
-          let costPerSchedule = 0;
-          let conversionRate = 0;
-          
-          // Check actions array for schedule_website
-          if (Array.isArray(row.actions)) {
-            const scheduleAction = row.actions.find((a: any) => 
-              a.action_type === 'schedule_website' || 
-              (a.action_type && a.action_type.toLowerCase().includes('schedule'))
-            );
-            if (scheduleAction) {
-              schedules = Number(scheduleAction.value || 0);
+        // Process rows efficiently using map and filter
+        const processedAds = rows
+          .map((row: any) => {
+            const adId = row.ad_id;
+            if (!adId) return null; // Skip rows without ad_id
+            
+            const impressions = Number(row.impressions || 0);
+            const clicks = Number(row.clicks || 0);
+            const spend = Number(row.spend || 0);
+            
+            // Extract schedule_website conversions from actions array
+            // The API returns actions with action_type breakdown when action_breakdowns=action_type
+            let schedules = 0;
+            let costPerSchedule = 0;
+            
+            // Check actions array for schedule_website (most common format)
+            if (Array.isArray(row.actions)) {
+              const scheduleAction = row.actions.find((a: any) => 
+                a.action_type === 'schedule_website'
+              );
+              if (scheduleAction) {
+                schedules = Number(scheduleAction.value || 0);
+              }
             }
-          }
-          
-          // Check conversions array (alternative format)
-          if (Array.isArray(row.conversions)) {
-            const scheduleConversion = row.conversions.find((c: any) => 
-              c.action_type === 'schedule_website' || 
-              (c.action_type && c.action_type.toLowerCase().includes('schedule'))
-            );
-            if (scheduleConversion) {
-              schedules = Number(scheduleConversion.value || schedules);
+            
+            // Check conversions array (alternative format)
+            if (schedules === 0 && Array.isArray(row.conversions)) {
+              const scheduleConversion = row.conversions.find((c: any) => 
+                c.action_type === 'schedule_website'
+              );
+              if (scheduleConversion) {
+                schedules = Number(scheduleConversion.value || 0);
+              }
             }
-          }
-          
-          // Get cost per action from cost_per_action_type
-          if (Array.isArray(row.cost_per_action_type)) {
-            const scheduleCost = row.cost_per_action_type.find((c: any) => 
-              c.action_type === 'schedule_website' || 
-              (c.action_type && c.action_type.toLowerCase().includes('schedule'))
-            );
-            if (scheduleCost) {
-              costPerSchedule = Number(scheduleCost.value || 0);
+            
+            // Get cost per action from cost_per_action_type
+            if (Array.isArray(row.cost_per_action_type)) {
+              const scheduleCost = row.cost_per_action_type.find((c: any) => 
+                c.action_type === 'schedule_website'
+              );
+              if (scheduleCost) {
+                costPerSchedule = Number(scheduleCost.value || 0);
+              }
             }
-          }
-          
-          // Calculate cost per schedule if not provided
-          if (costPerSchedule === 0 && schedules > 0 && spend > 0) {
-            costPerSchedule = spend / schedules;
-          }
-          
-          // Calculate conversion rate (schedules / clicks)
-          if (clicks > 0 && schedules > 0) {
-            conversionRate = (schedules / clicks) * 100;
-          }
-          
-          // Only include ads with schedules > 0
-          if (schedules > 0) {
-            const accountIdNumeric = facebookAccount.accountId.startsWith('act_')
-              ? facebookAccount.accountId.replace('act_', '')
-              : facebookAccount.accountId;
+            
+            // Calculate cost per schedule if not provided
+            if (costPerSchedule === 0 && schedules > 0 && spend > 0) {
+              costPerSchedule = spend / schedules;
+            }
+            
+            // Calculate conversion rate (schedules / clicks)
+            const conversionRate = clicks > 0 && schedules > 0 
+              ? (schedules / clicks) * 100 
+              : 0;
+            
+            // Only include ads with schedules > 0
+            if (schedules <= 0) return null;
+            
+            const accountIdNumeric = updatedAccount.accountId.startsWith('act_')
+              ? updatedAccount.accountId.replace('act_', '')
+              : updatedAccount.accountId;
             const facebookAdLink = `https://www.facebook.com/adsmanager/manage/ads?act=${accountIdNumeric}&selected_ad_ids[0]=${adId}`;
 
-            results.push({
+            return {
               combinationId: adId,
               facebookAdId: adId,
               adsetId: row.adset_id || '',
@@ -386,29 +406,46 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
               url: '',
               facebookAdLink,
               conversionEvents: extractConversionEvents(row),
-            });
-          }
-        }
+            };
+          })
+          .filter((ad: any) => ad !== null); // Remove null entries
+        
+        results = processedAds;
       } catch (error: any) {
         console.error('[getWinningAds] Failed to fetch account insights:', error);
-        throw error;
+        
+        // If we have stale cache, use it as fallback instead of failing
+        if (cache && cache.ads && cache.ads.length > 0) {
+          console.warn('[getWinningAds] Using stale cache due to API error');
+          results = cache.ads;
+        } else {
+          // No cache available, throw error
+          throw error;
+        }
       }
 
-      // Save to cache after successful fetch
-      await WinningAdsCache.findOneAndUpdate(
-        {
-          userId: req.userId,
-          facebookAccountId: facebookAccount._id,
-          since: sinceStr,
-          until: untilStr,
-        },
-        {
-          $set: {
-            ads: results,
-          },
-        },
-        { upsert: true, new: true }
-      );
+      // Save to cache after successful fetch (only if we got fresh data)
+      if (results.length > 0 || !cache) {
+        try {
+          await WinningAdsCache.findOneAndUpdate(
+            {
+              userId: req.userId,
+              facebookAccountId: facebookAccount._id,
+              since: sinceStr,
+              until: untilStr,
+            },
+            {
+              $set: {
+                ads: results,
+              },
+            },
+            { upsert: true, new: true }
+          );
+        } catch (cacheError: any) {
+          // Non-critical: log but don't fail the request
+          console.warn('[getWinningAds] Failed to save cache:', cacheError.message);
+        }
+      }
     }
 
     // Calculate relative scores for all ads (both fresh and cached)

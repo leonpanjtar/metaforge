@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import axios from 'axios';
+import { ImageAnalysisCache, generateImageHash } from '../../models/ImageAnalysisCache';
 
 // Alex Hormozi-style base prompt for image and video generation
 const HORMOZI_CREATIVE_BASE_PROMPT = `Act in the style of Alex Hormozi's direct-response principles. Create high-volume ad creatives built for aggressive testing. Every output must be simple, blunt, and impossible to misunderstand. One idea. One pain. One bold promise. One next step. Visuals should feel native and imperfect (phone-shot, raw framing, fast cuts, no polish). Hooks must hit in the first 1–2 seconds with outcome-first or problem-interrupt statements. Copy must be short and readable on mute. Lead with numbers and proof (specific results, timelines, comparisons). Generate multiple variations per concept (hooks, angles, formats, lengths) to maximize learning speed. Optimize for clarity over cleverness, volume over perfection, and learning over opinions—only goal: find what converts fastest at scale.`;
@@ -185,6 +186,23 @@ Return your analysis as JSON with these fields.`;
     currentBackground?: string;
   }> {
     try {
+      // Check cache first (valid for 24 hours)
+      const imageHash = generateImageHash(imageBuffer, userInstructions);
+      const cacheKey = userInstructions || '';
+      
+      const cached = await ImageAnalysisCache.findOne({
+        imageHash,
+        userInstructions: cacheKey,
+      });
+      
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      
+      if (cached && now - cached.updatedAt.getTime() < ONE_DAY_MS) {
+        // Return cached analysis
+        return cached.analysis;
+      }
+
       const base64Image = imageBuffer.toString('base64');
       const imageDataUrl = `data:image/png;base64,${base64Image}`;
 
@@ -297,23 +315,63 @@ Return your analysis as JSON with these fields:
         });
       }
       
-      return {
-        description: analysis.description || 'A Facebook ad image',
+      // Helper to extract string from potentially complex objects
+      const extractString = (value: any, fallback: string): string => {
+        if (typeof value === 'string') return value;
+        if (typeof value === 'object' && value !== null) {
+          // Try common fields that might contain the string
+          return value.description || value.text || value.core || value.main || JSON.stringify(value).substring(0, 200) || fallback;
+        }
+        return fallback;
+      };
+      
+      // Helper to extract array of strings
+      const extractStringArray = (value: any, fallback: string[]): string[] => {
+        if (Array.isArray(value)) {
+          return value.map((item: any) => {
+            if (typeof item === 'string') return item;
+            if (typeof item === 'object' && item !== null) {
+              return item.color || item.name || item.text || JSON.stringify(item).substring(0, 100);
+            }
+            return String(item);
+          }).filter((s: string) => s && s.length > 0);
+        }
+        return fallback;
+      };
+      
+      const analysisResult = {
+        description: extractString(analysis.description, 'A Facebook ad image'),
         aspectRatio,
         dimensions: { width: dimensions.width, height: dimensions.height },
-        style: analysis.style || 'modern',
-        mainSubject: analysis.mainSubject || 'product',
-        colors: analysis.colors || [],
+        style: extractString(analysis.style, 'modern'),
+        mainSubject: extractString(analysis.mainSubject, 'product'),
+        colors: extractStringArray(analysis.colors, []),
         textElements: parsedTextElements,
-        composition: analysis.composition || '',
-        background: analysis.background || '',
+        composition: extractString(analysis.composition, ''),
+        background: extractString(analysis.background, ''),
         preserveElements: analysis.preserveElements || [],
         changeableElements: analysis.changeableElements || [],
-        coreConcept: analysis.coreConcept || analysis.description || '',
-        currentStyle: analysis.currentStyle || analysis.style || 'modern',
-        currentColors: analysis.currentColors || analysis.colors || [],
-        currentBackground: analysis.currentBackground || analysis.background || '',
+        coreConcept: extractString(analysis.coreConcept || analysis.description, ''),
+        currentStyle: extractString(analysis.currentStyle || analysis.style, 'modern'),
+        currentColors: extractStringArray(analysis.currentColors || analysis.colors, []),
+        currentBackground: extractString(analysis.currentBackground || analysis.background, ''),
       };
+
+      // Save to cache (non-blocking)
+      ImageAnalysisCache.findOneAndUpdate(
+        { imageHash, userInstructions: cacheKey },
+        {
+          $set: {
+            analysis: analysisResult,
+          },
+        },
+        { upsert: true, new: true }
+      ).catch((cacheError: any) => {
+        // Non-critical: log but don't fail
+        console.warn('[CreativeGenerator] Failed to cache analysis:', cacheError.message);
+      });
+
+      return analysisResult;
     } catch (error: any) {
       throw new Error(`Failed to analyze image: ${error.message}`);
     }
@@ -382,220 +440,231 @@ Return your analysis as JSON with these fields:
         // Select variation type (cycle through options)
         const variationType = variationOptions[i % variationOptions.length];
         
-        // Build structured prompt
-        let prompt = `${HORMOZI_CREATIVE_BASE_PROMPT}\n\n`;
+        // Build optimized, concise prompt for faster generation
+        let prompt = `Create a high-quality Facebook ad image variant.\n\n`;
         
-        // Core concept (MUST STAY IDENTICAL)
+        // Core concept (MUST STAY IDENTICAL) - concise
         const coreConcept = analysis.coreConcept || analysis.description || `A Facebook ad for ${analysis.mainSubject || 'the product/service'}`;
-        prompt += `CORE CONCEPT (MUST STAY IDENTICAL):\n${coreConcept}\n\n`;
-        prompt += `⚠️ CRITICAL: The core concept, main message, and all text content must remain EXACTLY the same. Only visual styling can change.\n\n`;
+        prompt += `CORE (MUST STAY): ${coreConcept}\n`;
+        prompt += `⚠️ CRITICAL: Core concept, message, and ALL text must remain EXACTLY the same. Only visual styling changes.\n\n`;
         
-        // Main description
-        prompt += `A Facebook ad image variant that preserves the core concept but varies visual elements.\n\n`;
-        
-        // Layout section (core structure stays, details can vary)
-        prompt += `Layout:\n`;
+        // Layout - concise
         if (analysis.composition) {
-          prompt += `- Core structure: ${analysis.composition} (maintain core layout, can adjust details)\n`;
+          prompt += `Layout: ${analysis.composition} (maintain core, adjust details)\n`;
         }
         
-        // Text elements (content stays, style can vary)
+        // Text elements - concise but clear
         if (textStrings.length > 0) {
-          textStrings.forEach((text: string, idx: number) => {
-            const textElement = analysis.textElements[idx];
-            const position = textElement?.position || 'prominent position';
-            const currentStyle = textElement?.currentStyle || textElement?.style || 'bold, readable font';
-            prompt += `- ${position}: "${text}" (EXACT TEXT - MUST STAY SAME)\n`;
-            prompt += `  Current style: ${currentStyle} (CAN VARY: change font style, color, effects)\n`;
-          });
-        } else {
-          prompt += `- Clear, prominent headline and supporting text (exact text must stay, style can vary)\n`;
+          prompt += `Text (EXACT - must stay): ${textStrings.map((t: string) => `"${t}"`).join(', ')}\n`;
+          prompt += `Text style: CAN VARY (font, color, effects)\n`;
         }
         
-        // Visuals section
-        prompt += `\nVisuals:\n`;
+        // Visuals - concise
         const mainSubject = analysis.mainSubject || 'the main subject';
-        prompt += `- Main subject: ${mainSubject}\n`;
-        prompt += `  CORE (must stay): Identity, pose, expression, what they're doing\n`;
-        prompt += `  CAN VARY: Clothing style, colors, accessories, props, effects\n`;
-        prompt += `  ⚠️ CRITICAL: If humans are present in the original image, their faces and bodies must remain EXACTLY as they are - do not change facial features, body shape, or proportions. Only clothing, colors, and accessories can vary.\n`;
+        prompt += `Subject: ${mainSubject}\n`;
+        prompt += `CORE stays: Identity, pose, expression, actions\n`;
+        prompt += `CAN VARY: Clothing, colors, accessories, props, effects\n`;
+        prompt += `⚠️ HUMANS: If present, faces/bodies stay EXACT - only clothing/colors vary\n`;
         
-        // Variation-specific instructions
+        // Variation focus - concise
         if (userInstructions) {
-          prompt += `- Variation focus: ${userInstructions}\n`;
+          prompt += `Variation: ${userInstructions}\n`;
         } else {
-          switch (variationType.type) {
-            case 'style':
-              prompt += `- Variation: Change visual style (try different aesthetic: professional/casual, modern/classic, bold/minimal)\n`;
-              break;
-            case 'colors':
-              prompt += `- Variation: Change color scheme and palette (try different color combinations while keeping core concept)\n`;
-              break;
-            case 'background':
-              prompt += `- Variation: Change background setting (try different environments, settings, or backdrops)\n`;
-              break;
-            case 'font':
-              prompt += `- Variation: Change font style and text colors (try different typography while keeping exact text content)\n`;
-              break;
-            case 'effects':
-              prompt += `- Variation: Add visual effects, change lighting, or apply filters\n`;
-              break;
-            case 'elements':
-              prompt += `- Variation: Add people, decorative elements, or additional visual components\n`;
-              break;
-            case 'clothing':
-              prompt += `- Variation: Change clothing, accessories, or styling on people\n`;
-              break;
-          }
+          const variationMap: Record<string, string> = {
+            style: 'Change visual style (professional/casual, modern/classic, bold/minimal)',
+            colors: 'Change color scheme and palette',
+            background: 'Change background setting/environment',
+            font: 'Change font style and text colors',
+            effects: 'Add visual effects, change lighting, apply filters',
+            elements: 'Add people, decorative elements, visual components',
+            clothing: 'Change clothing, accessories, styling on people',
+          };
+          prompt += `Variation: ${variationMap[variationType.type] || 'Change visual elements'}\n`;
         }
         
+        // Current state (can vary)
         if (analysis.currentBackground) {
-          prompt += `- Current background: ${analysis.currentBackground} (can be changed)\n`;
+          prompt += `Current background: ${analysis.currentBackground} (can change)\n`;
         }
         if (analysis.currentColors && analysis.currentColors.length > 0) {
           const colorList = analysis.currentColors.map((c: any) => typeof c === 'string' ? c : (c as any).color || c).slice(0, 3).join(', ');
-          prompt += `- Current colors: ${colorList} (can be changed)\n`;
+          prompt += `Current colors: ${colorList} (can change)\n`;
         }
         
-        // Style section
-        prompt += `\nStyle:\n`;
-        prompt += `- Current style: ${analysis.currentStyle || analysis.style || 'Modern, professional'} (CAN VARY)\n`;
-        prompt += `- Native, authentic feel (phone-shot aesthetic, raw framing, imperfect polish)\n`;
-        prompt += `- Simple, blunt, impossible to misunderstand\n`;
-        prompt += `- One clear idea, one pain point, one bold promise\n`;
-        prompt += `- Clean typography, high contrast for readability\n`;
-        prompt += `- Text readable on mute (short, scannable)\n`;
+        // Style requirements - concise
+        prompt += `\nStyle: ${analysis.currentStyle || 'Modern, professional'} (can vary)\n`;
+        prompt += `- Native, authentic feel (phone-shot aesthetic)\n`;
+        prompt += `- Simple, clear, high contrast\n`;
+        prompt += `- Text readable on mute\n`;
         
-        // CTA section
-        const ctaText = textStrings.find((t: string) => 
-          t.toLowerCase().includes('try') || 
-          t.toLowerCase().includes('get') || 
-          t.toLowerCase().includes('start') ||
-          t.toLowerCase().includes('learn') ||
-          t.toLowerCase().includes('buy')
-        );
-        if (ctaText) {
-          prompt += `\nCTA:\n`;
-          prompt += `- Clear call-to-action button or text: "${ctaText}" (exact text must stay, style can vary)\n`;
-        } else {
-          prompt += `\nCTA:\n`;
-          prompt += `- Clear, action-oriented call-to-action button or text\n`;
-        }
-        
-        // Aspect ratio
-        prompt += `\nAspect ratio: ${analysis.aspectRatio}, ad-ready, high resolution\n`;
-        
-        // Critical requirements
-        prompt += `\n⚠️ CRITICAL REQUIREMENTS:\n`;
-        prompt += `- Core concept and message: MUST STAY IDENTICAL\n`;
-        prompt += `- All text content: MUST STAY EXACTLY THE SAME (words, numbers, symbols)\n`;
-        prompt += `- Main subject identity: MUST STAY THE SAME (who/what, pose, expression, what they're doing)\n`;
-        prompt += `- HUMAN FACES AND BODIES: If humans are present in the original image, their faces and bodies must remain EXACTLY as they are - preserve facial features, body shape, proportions, and poses. Only clothing, colors, accessories, and styling can vary.\n`;
-        prompt += `- CAN VARY: Visual style, colors, background, font style, effects, clothing, additional elements\n`;
+        // Critical requirements - concise but clear
+        prompt += `\n⚠️ MUST STAY: Core concept, message, ALL text, subject identity, human faces/bodies\n`;
+        prompt += `✅ CAN VARY: Style, colors, background, font style, effects, clothing, elements\n`;
         if (textStrings.length > 0) {
-          prompt += `- Text to preserve exactly: ${textStrings.map((t: string) => `"${t}"`).join(', ')}\n`;
+          prompt += `Text to preserve: ${textStrings.map((t: string) => `"${t}"`).join(', ')}\n`;
         }
+        prompt += `\nAspect ratio: ${analysis.aspectRatio}, high quality, ad-ready\n`;
         
         variationPrompts.push(prompt);
       }
 
-      // Step 4: Generate all variations
+      // Step 4: Generate all variations in parallel for speed
+      console.log(`[CreativeGenerator] Generating ${variationPrompts.length} variations in parallel...`);
+      
+      // Helper function to generate a single variation with retry logic
+      const generateSingleVariation = async (
+        prompt: string,
+        index: number,
+        retries: number = 3
+      ): Promise<{ success: boolean; imageUrl?: string; error?: string }> => {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            let base64Image: string | null = null;
+            let useDalle3Fallback = false;
+            
+            // Try gpt-image-1.5 first (faster and better for edits)
+            try {
+              const imageFile = new File([imageBuffer], 'image.png', { type: 'image/png' });
+              const result = await Promise.race([
+                this.getClient().images.edit({
+                  model: 'gpt-image-1.5',
+                  image: imageFile,
+                  prompt: prompt,
+                }),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Request timeout')), 60000) // 60s timeout
+                )
+              ]) as any;
+
+              if (result.data && result.data[0]) {
+                if (result.data[0].b64_json) {
+                  base64Image = result.data[0].b64_json;
+                } else if (result.data[0].url) {
+                  const imageResponse = await axios.get(result.data[0].url, { 
+                    responseType: 'arraybuffer',
+                    timeout: 30000 
+                  });
+                  base64Image = Buffer.from(imageResponse.data).toString('base64');
+                }
+              }
+            } catch (apiError: any) {
+              // Check if it's a retryable error
+              const isRetryable = apiError.message?.includes('timeout') || 
+                                apiError.message?.includes('rate limit') ||
+                                apiError.status === 429 ||
+                                apiError.code === 'ECONNRESET' ||
+                                apiError.code === 'ETIMEDOUT';
+              
+              if (isRetryable && attempt < retries) {
+                const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue; // Retry
+              }
+              
+              useDalle3Fallback = true;
+            }
+            
+            // Fallback to DALL-E 3 if gpt-image-1.5 fails
+            if (!base64Image || useDalle3Fallback) {
+              try {
+                let dallePrompt = prompt;
+                if (textStrings.length > 0) {
+                  dallePrompt += `\n\nTEXT ACCURACY IS CRITICAL: The following text must appear EXACTLY as written: ${textStrings.map((t: string) => `"${t}"`).join(', ')}. Each word must be correctly spelled and clearly readable.`;
+                }
+                
+                const dalleResponse = await Promise.race([
+                  this.getClient().images.generate({
+                    model: 'dall-e-3',
+                    prompt: dallePrompt,
+                    n: 1,
+                    size: size,
+                    quality: 'hd',
+                    response_format: 'url',
+                  }),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Request timeout')), 60000)
+                  )
+                ]) as any;
+
+                if (dalleResponse.data?.[0]?.url) {
+                  const imageResponse = await axios.get(dalleResponse.data[0].url, {
+                    responseType: 'arraybuffer',
+                    timeout: 30000,
+                  });
+                  const buffer = Buffer.from(imageResponse.data, 'binary');
+                  base64Image = buffer.toString('base64');
+                }
+              } catch (dalleError: any) {
+                const isRetryable = dalleError.message?.includes('timeout') || 
+                                  dalleError.message?.includes('rate limit') ||
+                                  dalleError.status === 429 ||
+                                  dalleError.code === 'ECONNRESET' ||
+                                  dalleError.code === 'ETIMEDOUT';
+                
+                if (isRetryable && attempt < retries) {
+                  const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                  await new Promise(resolve => setTimeout(resolve, waitTime));
+                  continue; // Retry
+                }
+                
+                throw dalleError;
+              }
+            }
+
+            if (base64Image) {
+              const dataUrl = `data:image/png;base64,${base64Image}`;
+              return { success: true, imageUrl: dataUrl };
+            } else {
+              throw new Error('No image in response');
+            }
+          } catch (error: any) {
+            // Non-retryable errors
+            if (error.message?.includes('API key') || error.message?.includes('authentication')) {
+              throw new Error(`OpenAI API authentication failed: ${error.message}`);
+            }
+            
+            // If last attempt, return error
+            if (attempt === retries) {
+              return { 
+                success: false, 
+                error: error.message || 'Unknown error' 
+              };
+            }
+            
+            // Wait before retry (exponential backoff)
+            const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+        
+        return { success: false, error: 'Failed after all retries' };
+      };
+
+      // Generate all variations in parallel (with concurrency limit)
+      const CONCURRENCY_LIMIT = 3; // Generate 3 at a time to avoid rate limits
       const imageUrls: string[] = [];
       const errors: string[] = [];
       
-      console.log(`[CreativeGenerator] Generating ${variationPrompts.length} variations with gpt-image-1...`);
-      
-      for (let i = 0; i < variationPrompts.length; i++) {
-        try {
-          
-          // Use Images API with gpt-image-1 model, with fallback to DALL-E 3
-          let base64Image: string | null = null;
-          let useDalle3Fallback = false;
-          
-          try {
-            // Use images.edit() API directly - faster than Responses API
-            // Create a File object from the buffer (SDK expects File, not Buffer)
-            const imageFile = new File([imageBuffer], 'image.png', { type: 'image/png' });
-            const result = await this.getClient().images.edit({
-              model: 'gpt-image-1.5',
-              image: imageFile,
-              prompt: variationPrompts[i],
-            });
-
-            // Extract base64 from result
-            if (result.data && result.data[0] && result.data[0].b64_json) {
-              base64Image = result.data[0].b64_json;
-            } else if (result.data && result.data[0] && result.data[0].url) {
-              // If URL is returned instead, download it and convert to base64
-              const imageResponse = await axios.get(result.data[0].url, { responseType: 'arraybuffer' });
-              base64Image = Buffer.from(imageResponse.data).toString('base64');
+      // Process in batches
+      for (let i = 0; i < variationPrompts.length; i += CONCURRENCY_LIMIT) {
+        const batch = variationPrompts.slice(i, i + CONCURRENCY_LIMIT);
+        const batchPromises = batch.map((prompt, batchIndex) => 
+          generateSingleVariation(prompt, i + batchIndex)
+        );
+        
+        const batchResults = await Promise.allSettled(batchPromises);
+        
+        batchResults.forEach((result, batchIndex) => {
+          if (result.status === 'fulfilled') {
+            if (result.value.success && result.value.imageUrl) {
+              imageUrls.push(result.value.imageUrl);
+            } else {
+              errors.push(`Variation ${i + batchIndex + 1}: ${result.value.error || 'Unknown error'}`);
             }
-          } catch (apiError: any) {
-            console.error('[CreativeGenerator] gpt-image-1 API error:', apiError.message);
-            useDalle3Fallback = true;
-          }
-          
-          // Fallback to DALL-E 3 if gpt-image-1 fails or is not available
-          if (!base64Image || useDalle3Fallback) {
-            try {
-              
-              // Enhance prompt for DALL-E 3 with even more specific instructions
-              let dallePrompt = variationPrompts[i];
-              
-              // DALL-E 3 specific enhancements
-              if (textStrings.length > 0) {
-                dallePrompt += `\n\nTEXT ACCURACY IS CRITICAL: The following text must appear EXACTLY as written: ${textStrings.map((t: string) => `"${t}"`).join(', ')}. Each word must be correctly spelled and clearly readable.`;
-              }
-              
-              const dalleResponse = await this.getClient().images.generate({
-                model: 'dall-e-3',
-                prompt: dallePrompt,
-                n: 1,
-                size: size,
-                quality: 'hd', // Use HD quality for better results
-                response_format: 'url',
-              });
-
-              if (dalleResponse.data?.[0]?.url) {
-                // Convert URL to base64 for consistency
-                const axios = require('axios');
-                const imageResponse = await axios.get(dalleResponse.data[0].url, {
-                  responseType: 'arraybuffer',
-                });
-                const buffer = Buffer.from(imageResponse.data, 'binary');
-                base64Image = buffer.toString('base64');
-              }
-            } catch (dalleError: any) {
-              throw new Error(`Both gpt-5 and DALL-E 3 failed. DALL-E 3 error: ${dalleError.message}`);
-            }
-          }
-
-          if (base64Image) {
-            // Convert base64 to data URL for consistency with existing download logic
-            const dataUrl = `data:image/png;base64,${base64Image}`;
-            imageUrls.push(dataUrl);
           } else {
-            const errorMsg = `Variation ${i + 1}: No image in response`;
-            console.error(`[CreativeGenerator] ${errorMsg}`);
-            errors.push(errorMsg);
+            errors.push(`Variation ${i + batchIndex + 1}: ${result.reason?.message || 'Promise rejected'}`);
           }
-        } catch (error: any) {
-          const errorMsg = `Variation ${i + 1}: ${error.message || 'Unknown error'}`;
-          console.error(`[CreativeGenerator] ${errorMsg}`, error);
-          errors.push(errorMsg);
-          
-          // If it's an API key error, throw immediately
-          if (error.message?.includes('API key') || error.message?.includes('authentication')) {
-            throw new Error(`OpenAI API authentication failed: ${error.message}. Please check your OPENAI_API_KEY environment variable.`);
-          }
-          
-          // If it's a rate limit error, throw immediately
-          if (error.message?.includes('rate limit') || error.status === 429) {
-            throw new Error(`OpenAI rate limit exceeded: ${error.message}. Please try again later.`);
-          }
-          
-          // Continue with other variations even if one fails
-        }
+        });
       }
       
       if (imageUrls.length === 0 && errors.length > 0) {

@@ -336,46 +336,54 @@ export const generateImageVariationsWithOpenAI = async (req: AuthRequest, res: R
         analysis: analysis
       });
 
-      // Generate variations one at a time
+      // Generate all variations at once (parallel processing in service)
+      sendSSE('progress', { 
+        type: 'generating', 
+        message: `Generating ${variantCount} variation(s) in parallel...`,
+        progress: 0,
+        total: variantCount
+      });
+
+      // Generate all variations in parallel (handled in service layer)
+      const result = await creativeGenerator.generateImageVariationsWithOpenAI(
+        file.buffer,
+        variantCount, // Generate all at once
+        instructions
+      );
+
+      if (!result || result.imageUrls.length === 0) {
+        sendSSE('error', { 
+          message: 'Failed to generate any variations'
+        });
+        res.end();
+        return;
+      }
+
+      // Process and save all generated images
       const fileStorageService = new FileStorageService();
       const savedAssets: any[] = [];
       const errors: string[] = [];
 
-      for (let i = 0; i < variantCount; i++) {
+      for (let i = 0; i < result.imageUrls.length; i++) {
         try {
           sendSSE('progress', { 
-            type: 'generating', 
-            message: `Generating variation ${i + 1} of ${variantCount}...`,
+            type: 'processing', 
+            message: `Saving variation ${i + 1} of ${result.imageUrls.length}...`,
             progress: i,
-            total: variantCount,
+            total: result.imageUrls.length,
             currentIndex: i
           });
 
-          // Generate single variation
-          const result = await creativeGenerator.generateImageVariationsWithOpenAI(
-            file.buffer,
-            1, // Generate one at a time
-            instructions
-          );
-
-          if (!result || result.imageUrls.length === 0) {
-            errors.push(`Variation ${i + 1}: No image generated`);
+          const imageData = result.imageUrls[i];
+          
+          if (!imageData) {
+            errors.push(`Variation ${i + 1}: No image data`);
             sendSSE('error', { 
               index: i,
-              message: `Failed to generate variation ${i + 1}`
+              message: `Failed to process variation ${i + 1}: No image data`
             });
             continue;
           }
-
-          const imageData = result.imageUrls[0];
-          
-          sendSSE('progress', { 
-            type: 'processing', 
-            message: `Processing variation ${i + 1}...`,
-            progress: i,
-            total: variantCount,
-            currentIndex: i
-          });
 
           let buffer: Buffer;
           let mimeType = 'image/png';

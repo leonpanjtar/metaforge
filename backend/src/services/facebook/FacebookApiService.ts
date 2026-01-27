@@ -188,64 +188,102 @@ export class FacebookApiService {
    */
   async getAccountAdInsights(
     accountId: string,
-    dateRange: { since: string; until: string }
+    dateRange: { since: string; until: string },
+    retries: number = 3
   ): Promise<any[]> {
-    try {
-      const allResults: any[] = [];
-      let nextUrl: string | null = null;
-      let pageCount = 0;
-      const maxPages = 100; // Safety limit
+    const maxPages = 100; // Safety limit
+    const requestTimeout = 30000; // 30 seconds timeout per request
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const allResults: any[] = [];
+        let nextUrl: string | null = null;
+        let pageCount = 0;
 
-      do {
-        let response;
-        if (nextUrl) {
-          // For pagination, use axios directly with the full URL
-          // The next URL already contains the access token
-          response = await axios.get(nextUrl);
-        } else {
-          // First page - construct URL manually to match the exact working query format
-          // Note: accountId should already include 'act_' prefix
-          const baseUrl = `https://graph.facebook.com/${this.apiVersion}/${accountId}/insights`;
-          const params = new URLSearchParams({
-            fields: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,impressions,reach,spend,clicks,inline_link_clicks,actions,action_values,conversions,conversion_values,cost_per_action_type',
-            'time_range[since]': dateRange.since,
-            'time_range[until]': dateRange.until,
-            action_breakdowns: 'action_type',
-            action_type: 'schedule_website',
-            level: 'ad',
-            access_token: this.accessToken,
-          });
-          
-          const url = `${baseUrl}?${params.toString()}`;
-          response = await axios.get(url);
+        do {
+          let response;
+          try {
+            if (nextUrl) {
+              // For pagination, use axios directly with the full URL
+              // The next URL already contains the access token
+              response = await axios.get(nextUrl, {
+                timeout: requestTimeout,
+              });
+            } else {
+              // First page - construct URL manually to match the exact working query format
+              // Note: accountId should already include 'act_' prefix
+              const baseUrl = `https://graph.facebook.com/${this.apiVersion}/${accountId}/insights`;
+              const params = new URLSearchParams({
+                fields: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,impressions,reach,spend,clicks,inline_link_clicks,actions,action_values,conversions,conversion_values,cost_per_action_type',
+                'time_range[since]': dateRange.since,
+                'time_range[until]': dateRange.until,
+                action_breakdowns: 'action_type',
+                action_type: 'schedule_website',
+                level: 'ad',
+                access_token: this.accessToken,
+              });
+              
+              const url = `${baseUrl}?${params.toString()}`;
+              response = await axios.get(url, {
+                timeout: requestTimeout,
+              });
+            }
+
+            const data = response.data?.data || [];
+            if (Array.isArray(data)) {
+              allResults.push(...data);
+            }
+
+            // Check for pagination
+            const paging: any = response.data?.paging;
+            if (paging && paging.next) {
+              nextUrl = paging.next;
+              pageCount++;
+            } else {
+              nextUrl = null;
+            }
+
+            // Safety check to prevent infinite loops
+            if (pageCount >= maxPages) {
+              console.warn(`[getAccountAdInsights] Reached max pages limit (${maxPages}), stopping pagination`);
+              break;
+            }
+          } catch (pageError: any) {
+            // If it's a rate limit or transient error, retry the page
+            if (pageError.response?.status === 429 || pageError.code === 'ECONNRESET' || pageError.code === 'ETIMEDOUT') {
+              if (attempt < retries) {
+                // Wait before retrying (exponential backoff)
+                const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue; // Retry the same page
+              }
+            }
+            throw pageError;
+          }
+        } while (nextUrl);
+
+        return allResults;
+      } catch (error: any) {
+        const fbError = error.response?.data?.error;
+        const isRateLimit = error.response?.status === 429;
+        const isTransient = error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED';
+        
+        // If it's the last attempt or not a retryable error, throw
+        if (attempt === retries || (!isRateLimit && !isTransient)) {
+          const message =
+            fbError?.message || error.message || 'Failed to fetch account ad insights';
+          throw new Error(`Failed to fetch account ad insights: ${message}`);
         }
-
-        const data = response.data.data || [];
-        allResults.push(...data);
-
-        // Check for pagination
-        const paging: any = response.data.paging;
-        if (paging && paging.next) {
-          nextUrl = paging.next;
-          pageCount++;
-        } else {
-          nextUrl = null;
-        }
-
-        // Safety check to prevent infinite loops
-        if (pageCount >= maxPages) {
-          console.warn(`[getAccountAdInsights] Reached max pages limit (${maxPages}), stopping pagination`);
-          break;
-        }
-      } while (nextUrl);
-
-      return allResults;
-    } catch (error: any) {
-      const fbError = error.response?.data?.error;
-      const message =
-        fbError?.message || error.message || 'Failed to fetch account ad insights';
-      throw new Error(`Failed to fetch account ad insights: ${message}`);
+        
+        // Wait before retrying (exponential backoff)
+        const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        console.warn(`[getAccountAdInsights] Attempt ${attempt} failed, retrying in ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
+    
+    // This should never be reached, but TypeScript needs it
+    throw new Error('Failed to fetch account ad insights after all retries');
   }
 
   async getPages(): Promise<Array<{ id: string; name: string }>> {

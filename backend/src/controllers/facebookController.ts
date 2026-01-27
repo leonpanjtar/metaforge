@@ -452,10 +452,24 @@ export const getPagesForCampaign = async (req: AuthRequest, res: Response): Prom
   try {
     const { campaignId } = req.params;
 
-    const campaign = await Campaign.findOne({
-      _id: campaignId,
-      userId: req.userId,
-    });
+    // Get account filter to check campaign access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build campaign query - check by accountId first, then fallback to userId
+    const campaignQuery: any = { _id: campaignId };
+    
+    if (accountFilter.accountId) {
+      campaignQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      campaignQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const campaign = await Campaign.findOne(campaignQuery);
 
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found' });
@@ -570,9 +584,13 @@ export const setActiveAccount = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Verify account belongs to user
+    // Get all user IDs in the current account
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Verify account belongs to any user in the account
     const account = await FacebookAccount.findOne({
-      userId: req.userId,
+      userId: { $in: accountUserObjectIds },
       _id: accountId,
       isActive: true,
     });
@@ -624,8 +642,13 @@ export const setActiveAccount = async (req: AuthRequest, res: Response): Promise
 // Get all available accounts and pages for selection
 export const getAccountsForSelection = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+    
+    // Fetch Facebook accounts from all users in the account
     const accounts = await FacebookAccount.find({
-      userId: req.userId,
+      userId: { $in: accountUserObjectIds },
       isActive: true,
     }).select('-accessToken');
 
