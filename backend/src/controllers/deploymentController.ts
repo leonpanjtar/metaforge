@@ -243,8 +243,7 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
           .populate('assetIds')
           .populate('headlineId')
           .populate('bodyId')
-          .populate('descriptionId')
-          .populate('ctaId');
+          .populate('descriptionId');
 
         if (!combination) {
           errors.push({ combinationId, error: 'Combination not found' });
