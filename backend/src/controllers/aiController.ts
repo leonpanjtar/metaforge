@@ -73,11 +73,25 @@ export const generateImageFromPrompt = async (req: AuthRequest, res: Response): 
     // @ts-ignore - image-size doesn't have TypeScript types
     const sizeOf = require('image-size');
 
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
     // Verify adset ownership
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    const adset = await Adset.findOne(adsetQuery);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
@@ -235,7 +249,8 @@ export const generateSingleImageVariation = async (req: AuthRequest, res: Respon
     if (facebookAccount) {
       try {
         await TokenRefreshService.checkAndRefreshToken(facebookAccount);
-        const apiService = new FacebookApiService(facebookAccount.accessToken);
+        const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+        const apiService = new FacebookCacheService(facebookAccount.accessToken);
         
         // Upload image to Facebook to get hash for preview generation
         imageHash = await apiService.uploadAdImage(
@@ -698,7 +713,8 @@ export const generateMetaAIPreviews = async (req: AuthRequest, res: Response): P
     }
 
     await TokenRefreshService.checkAndRefreshToken(facebookAccount);
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
 
     // Get page ID if not provided
     let finalPageId = pageId;
@@ -784,6 +800,13 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
     const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
 
+    // Get account filter to check asset/adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
     // Get the asset
     const asset = await Asset.findById(assetId).populate('adsetId');
     if (!asset) {
@@ -792,7 +815,19 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
     }
 
     const adset = asset.adsetId as any;
-    if (adset.userId.toString() !== req.userId) {
+    
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adset._id };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const verifiedAdset = await Adset.findOne(adsetQuery);
+    if (!verifiedAdset) {
       res.status(403).json({ error: 'Unauthorized' });
       return;
     }
@@ -815,7 +850,8 @@ export const generateVariantsFromAsset = async (req: AuthRequest, res: Response)
     }
 
     await TokenRefreshService.checkAndRefreshToken(facebookAccount);
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
 
     // Get or upload image to Facebook to get hash
     let imageHash = asset.metadata?.facebookImageHash;
@@ -989,11 +1025,25 @@ export const downloadImageFromPreview = async (req: AuthRequest, res: Response):
     // @ts-ignore - image-size doesn't have TypeScript types
     const sizeOf = require('image-size');
 
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: adsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
     // Verify adset ownership
-    const adset = await Adset.findOne({
-      _id: adsetId,
-      userId: req.userId,
-    });
+    const adset = await Adset.findOne(adsetQuery);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });

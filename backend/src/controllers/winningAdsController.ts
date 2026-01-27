@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { FacebookAccount } from '../models/FacebookAccount';
 import { FacebookApiService } from '../services/facebook/FacebookApiService';
@@ -314,7 +315,8 @@ export const getWinningAds = async (req: AuthRequest, res: Response): Promise<vo
         return;
       }
 
-      const apiService = new FacebookApiService(updatedAccount.accessToken);
+      const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+      const apiService = new FacebookCacheService(updatedAccount.accessToken);
       const accountIdWithPrefix = updatedAccount.accountId.startsWith('act_')
         ? updatedAccount.accountId
         : `act_${updatedAccount.accountId}`;
@@ -595,7 +597,8 @@ export const getAdDetails = async (req: AuthRequest, res: Response): Promise<voi
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
     await TokenRefreshService.checkAndRefreshToken(facebookAccount);
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
 
     // Get ad details directly from Facebook API
     // Note: This works for any ad in the account, not just ads created through the app
@@ -750,7 +753,8 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       return;
     }
 
-    const apiService = new FacebookApiService(updatedAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(updatedAccount.accessToken);
 
     // Get ad details directly from Facebook API (same as getAdDetails)
     const adDetails = await apiService.getAdDetails(facebookAdId);
@@ -1140,9 +1144,26 @@ export const importWinningAd = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    // Get account filter to check adset access
+    const accountFilter = await getAccountFilter(req);
+    
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    // Build adset query - check by accountId first, then fallback to userId
+    const adsetQuery: any = { _id: targetAdsetId };
+    
+    if (accountFilter.accountId) {
+      adsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      adsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
     // Verify target adset belongs to user
-    const targetAdset = await Adset.findById(targetAdsetId);
-    if (!targetAdset || (targetAdset.userId as any).toString() !== req.userId) {
+    const targetAdset = await Adset.findOne(adsetQuery);
+    if (!targetAdset) {
       res.status(404).json({ error: 'Target adset not found or access denied' });
       return;
     }
@@ -1154,8 +1175,18 @@ export const importWinningAd = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const sourceAdset = await Adset.findById((sourceCombination.adsetId as any)._id).populate('campaignId');
-    if (!sourceAdset || (sourceAdset.userId as any).toString() !== req.userId) {
+    // Build source adset query
+    const sourceAdsetQuery: any = { _id: (sourceCombination.adsetId as any)._id };
+    
+    if (accountFilter.accountId) {
+      sourceAdsetQuery.accountId = new mongoose.Types.ObjectId(accountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      sourceAdsetQuery.userId = { $in: accountUserObjectIds };
+    }
+
+    const sourceAdset = await Adset.findOne(sourceAdsetQuery).populate('campaignId');
+    if (!sourceAdset) {
       res.status(404).json({ error: 'Source adset not found or access denied' });
       return;
     }
@@ -1167,7 +1198,8 @@ export const importWinningAd = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
 
     // Get ad details and creative
     const adDetails = await apiService.getAdDetails(facebookAdId);

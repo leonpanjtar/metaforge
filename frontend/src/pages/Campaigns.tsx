@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
 import FacebookConnector from '../components/FacebookConnector';
+import { HiRefresh } from 'react-icons/hi';
 
 interface FacebookAccount {
   _id: string;
@@ -21,6 +22,7 @@ interface Campaign {
 const Campaigns = () => {
   const { currentAccount } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [reconnectLoading, setReconnectLoading] = useState(false);
@@ -62,6 +64,27 @@ const Campaigns = () => {
     enabled: !!selectedAccountId,
   });
 
+  const syncCampaignsMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const response = await api.post(`/facebook/campaigns/${accountId}/sync`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['campaigns', selectedAccountId] });
+      alert('Campaigns synced from Facebook successfully!');
+    },
+    onError: (error: any) => {
+      alert(error.response?.data?.error || 'Failed to sync campaigns from Facebook');
+    },
+  });
+
+  const handleSyncCampaigns = () => {
+    if (!selectedAccountId) return;
+    if (window.confirm('Sync campaigns from Facebook? This will update the campaign list with the latest data from Facebook.')) {
+      syncCampaignsMutation.mutate(selectedAccountId);
+    }
+  };
+
   useEffect(() => {
     if (accounts && accounts.length > 0 && !selectedAccountId) {
       setSelectedAccountId(accounts[0]._id);
@@ -96,11 +119,26 @@ const Campaigns = () => {
 
   return (
     <div className="px-4 py-6 sm:px-0">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Campaigns</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Select a Facebook account to view campaigns
-        </p>
+      <div className="mb-6 flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Campaigns</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Select a Facebook account to view campaigns
+          </p>
+        </div>
+        {selectedAccountId && (
+          <div className="flex gap-2">
+            <button
+              onClick={handleSyncCampaigns}
+              disabled={syncCampaignsMutation.isPending}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50"
+              title="Sync campaigns from Facebook"
+            >
+              <HiRefresh className={`w-4 h-4 ${syncCampaignsMutation.isPending ? 'animate-spin' : ''}`} />
+              {syncCampaignsMutation.isPending ? 'Syncing...' : 'Sync from Facebook'}
+            </button>
+          </div>
+        )}
       </div>
 
       {(!accounts || accounts.length === 0) && (

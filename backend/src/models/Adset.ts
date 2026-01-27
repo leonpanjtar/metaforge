@@ -9,6 +9,8 @@ export interface ITargeting {
   behaviors?: string[];
   detailedTargeting?: string[];
   placements?: string[];
+  customAudiences?: any[]; // Saved audiences / custom audiences
+  [key: string]: any; // Allow additional targeting fields
 }
 
 export interface IAdset extends Document {
@@ -66,6 +68,9 @@ const TargetingSchema = new Schema<ITargeting>({
   behaviors: [String],
   detailedTargeting: [String],
   placements: [String],
+  customAudiences: [Schema.Types.Mixed], // Saved audiences / custom audiences
+}, {
+  strict: false, // Allow additional fields not defined in schema
 });
 
 const AdsetSchema = new Schema<IAdset>(

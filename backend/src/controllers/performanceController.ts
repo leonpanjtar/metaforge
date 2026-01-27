@@ -45,7 +45,8 @@ export const syncPerformanceData = async (
       return;
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
 
     // Get all deployed combinations
     const combinations = await AdCombination.find({

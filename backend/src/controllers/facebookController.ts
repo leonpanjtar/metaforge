@@ -109,7 +109,8 @@ export const handleCallback = async (
     tokenExpiry.setSeconds(tokenExpiry.getSeconds() + tokenResult.expiresIn);
 
     // Get ad accounts using the long-lived token
-    const longLivedApiService = new FacebookApiService(longLivedToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const longLivedApiService = new FacebookCacheService(longLivedToken);
     const adAccounts = await longLivedApiService.getAdAccounts();
 
     // Store each account
@@ -192,6 +193,46 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
+    // Get account filter to query campaigns
+    const campaignAccountFilter = await getAccountFilter(req);
+
+    // Return campaigns from database only (static list)
+    const campaignQuery: any = { facebookAccountId: accountId };
+    
+    if (campaignAccountFilter.accountId) {
+      campaignQuery.accountId = new mongoose.Types.ObjectId(campaignAccountFilter.accountId);
+    } else {
+      // Fallback to userId for backward compatibility
+      campaignQuery.userId = { $in: accountUserObjectIds };
+    }
+    
+    const dbCampaigns = await Campaign.find(campaignQuery);
+
+    res.json(dbCampaigns);
+  } catch (error: any) {
+    console.error('Get campaigns error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch campaigns' });
+  }
+};
+
+export const syncCampaigns = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId } = req.params;
+
+    // Get all user IDs in the current account (as ObjectIds)
+    const { getAccountUserObjectIds } = await import('../utils/accountFilter');
+    const accountUserObjectIds = await getAccountUserObjectIds(req);
+
+    const facebookAccount = await FacebookAccount.findOne({
+      userId: { $in: accountUserObjectIds },
+      _id: accountId,
+    });
+
+    if (!facebookAccount) {
+      res.status(404).json({ error: 'Facebook account not found' });
+      return;
+    }
+
     // Check and refresh token if needed
     const tokenValid = await TokenRefreshService.checkAndRefreshToken(facebookAccount);
     if (!tokenValid) {
@@ -201,7 +242,11 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
+    
+    // Invalidate cache to force fresh fetch
+    apiService.invalidate('campaigns:');
     const campaigns = await apiService.getCampaigns(`act_${facebookAccount.accountId}`);
 
     // Get account filter to set accountId on campaigns
@@ -240,7 +285,7 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
       }
     }
 
-    // Get campaigns from the account (query by accountId first, then fallback to userId)
+    // Get updated campaigns from the account
     const campaignQuery: any = { facebookAccountId: accountId };
     
     if (campaignAccountFilter.accountId) {
@@ -254,8 +299,8 @@ export const getCampaigns = async (req: AuthRequest, res: Response): Promise<voi
 
     res.json(dbCampaigns);
   } catch (error: any) {
-    console.error('Get campaigns error:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch campaigns' });
+    console.error('Sync campaigns error:', error);
+    res.status(500).json({ error: error.message || 'Failed to sync campaigns from Facebook' });
   }
 };
 
@@ -289,7 +334,8 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
     await TokenRefreshService.checkAndRefreshToken(facebookAccount);
     
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
     const facebookAdsets = await apiService.getAdsets((campaign as any).facebookCampaignId);
 
     const { Adset } = await import('../models/Adset');
@@ -435,6 +481,10 @@ export const importFacebookAdsets = async (req: AuthRequest, res: Response): Pro
       }
     }
 
+    // Invalidate adsets cache after import
+    apiService.invalidate('adsets:');
+    apiService.invalidate('adsetDetails:');
+
     res.json({
       success: true,
       imported: importedAdsets.length,
@@ -487,7 +537,8 @@ export const getPagesForCampaign = async (req: AuthRequest, res: Response): Prom
     // Refresh token if needed
     await TokenRefreshService.checkAndRefreshToken(facebookAccount);
 
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(facebookAccount.accessToken);
     const pages = await apiService.getPages();
 
     res.json(pages);
@@ -603,7 +654,8 @@ export const setActiveAccount = async (req: AuthRequest, res: Response): Promise
     // Verify page if provided
     if (pageId) {
       await TokenRefreshService.checkAndRefreshToken(account);
-      const apiService = new FacebookApiService(account.accessToken);
+      const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+      const apiService = new FacebookCacheService(account.accessToken);
       const pages = await apiService.getPages();
       const pageExists = pages.some((p) => p.id === pageId);
       
@@ -657,7 +709,8 @@ export const getAccountsForSelection = async (req: AuthRequest, res: Response): 
       accounts.map(async (account) => {
         try {
           await TokenRefreshService.checkAndRefreshToken(account);
-          const apiService = new FacebookApiService(account.accessToken);
+          const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+          const apiService = new FacebookCacheService(account.accessToken);
           const pages = await apiService.getPages();
           return {
             _id: account._id,

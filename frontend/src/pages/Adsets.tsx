@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import { HiTrash, HiDuplicate, HiTemplate, HiRefresh, HiPencil } from 'react-icons/hi';
+import { HiTrash, HiDuplicate, HiTemplate, HiRefresh, HiPencil, HiX } from 'react-icons/hi';
 
 interface Adset {
   _id: string;
@@ -26,6 +26,17 @@ interface Adset {
   createdByApp?: boolean;
 }
 
+interface Campaign {
+  _id: string;
+  name: string;
+}
+
+interface FacebookAccount {
+  _id: string;
+  accountId: string;
+  accountName: string;
+}
+
 const Adsets = () => {
   const { campaignId } = useParams<{ campaignId: string }>();
   const navigate = useNavigate();
@@ -33,6 +44,13 @@ const Adsets = () => {
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [selectedAdsetForDuplicate, setSelectedAdsetForDuplicate] = useState<Adset | null>(null);
+  const [duplicateFormData, setDuplicateFormData] = useState({
+    campaignId: '',
+    adsetName: '',
+    sourceAdsetId: '',
+  });
 
   const { data: adsets } = useQuery<Adset[]>({
     queryKey: ['adsets', campaignId],
@@ -42,13 +60,51 @@ const Adsets = () => {
     },
   });
 
+  // Fetch Facebook accounts for campaign selection
+  const { data: facebookAccounts } = useQuery<FacebookAccount[]>({
+    queryKey: ['facebook-accounts'],
+    queryFn: async () => {
+      const response = await api.get('/facebook/accounts');
+      return response.data;
+    },
+  });
+
+  // Fetch campaigns for selected account
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const { data: campaigns } = useQuery<Campaign[]>({
+    queryKey: ['campaigns', selectedAccountId],
+    queryFn: async () => {
+      if (!selectedAccountId) return [];
+      const response = await api.get(`/facebook/campaigns/${selectedAccountId}`);
+      return response.data;
+    },
+    enabled: !!selectedAccountId,
+  });
+
+  // Set default account when accounts load
+  useEffect(() => {
+    if (facebookAccounts && facebookAccounts.length > 0 && !selectedAccountId) {
+      setSelectedAccountId(facebookAccounts[0]._id);
+    }
+  }, [facebookAccounts, selectedAccountId]);
+
+  // Fetch all adsets for source adset selection
+  const { data: allAdsets } = useQuery<Adset[]>({
+    queryKey: ['all-adsets'],
+    queryFn: async () => {
+      const response = await api.get('/adsets');
+      return response.data || [];
+    },
+  });
+
   const duplicateMutation = useMutation({
-    mutationFn: async ({ adsetId, name }: { adsetId: string; name?: string }) => {
-      const response = await api.post(`/adsets/${adsetId}/duplicate`, { name });
+    mutationFn: async ({ adsetId, name, campaignId }: { adsetId: string; name?: string; campaignId?: string }) => {
+      const response = await api.post(`/adsets/${adsetId}/duplicate`, { name, campaignId });
       return response.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adsets', campaignId] });
+      queryClient.invalidateQueries({ queryKey: ['all-adsets'] });
       setDuplicatingId(null);
     },
   });
@@ -70,20 +126,35 @@ const Adsets = () => {
   });
 
   const handleDuplicate = async (adset: Adset) => {
-    const newName = prompt(
-      'Enter name for duplicated adset (all settings will be copied):',
-      `${adset.name} (Copy)`
-    );
-    if (!newName) return;
+    setSelectedAdsetForDuplicate(adset);
+    // Set default values
+    setDuplicateFormData({
+      campaignId: campaignId || '',
+      adsetName: `${adset.name} (Copy)`,
+      sourceAdsetId: adset._id,
+    });
+    setShowDuplicateModal(true);
+  };
 
-    setDuplicatingId(adset._id);
+  const handleDuplicateSubmit = async () => {
+    if (!duplicateFormData.campaignId || !duplicateFormData.adsetName || !duplicateFormData.sourceAdsetId) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    if (!selectedAdsetForDuplicate) return;
+
+    setDuplicatingId(selectedAdsetForDuplicate._id);
     try {
       const duplicated = await duplicateMutation.mutateAsync({
-        adsetId: adset._id,
-        name: newName,
+        adsetId: duplicateFormData.sourceAdsetId,
+        name: duplicateFormData.adsetName,
+        campaignId: duplicateFormData.campaignId,
       });
       alert(`Adset duplicated successfully! All settings including targeting, conversion goals, and optimization settings have been copied.`);
-      navigate(`/assets/${duplicated._id}`);
+      setShowDuplicateModal(false);
+      setSelectedAdsetForDuplicate(null);
+      navigate(`/adsets/edit/${duplicated._id}`);
     } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to duplicate adset');
     } finally {
@@ -339,6 +410,146 @@ const Adsets = () => {
           >
             Create your first adset
           </Link>
+        </div>
+      )}
+
+      {/* Duplicate Adset Modal */}
+      {showDuplicateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center p-6 border-b">
+              <h2 className="text-xl font-bold text-gray-900">Duplicate Adset</h2>
+              <button
+                onClick={() => {
+                  setShowDuplicateModal(false);
+                  setSelectedAdsetForDuplicate(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <HiX className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Facebook Account Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Facebook Account
+                </label>
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => {
+                    setSelectedAccountId(e.target.value);
+                    setDuplicateFormData({ ...duplicateFormData, campaignId: '' });
+                  }}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="">Select an account</option>
+                  {facebookAccounts?.map((account) => (
+                    <option key={account._id} value={account._id}>
+                      {account.accountName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Campaign Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Target Campaign <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={duplicateFormData.campaignId}
+                  onChange={(e) => {
+                    setDuplicateFormData({ 
+                      ...duplicateFormData, 
+                      campaignId: e.target.value,
+                      sourceAdsetId: '' // Reset source adset when campaign changes
+                    });
+                  }}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                >
+                  <option value="">Select a campaign</option>
+                  {campaigns?.map((campaign) => (
+                    <option key={campaign._id} value={campaign._id}>
+                      {campaign.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Adset Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Adset Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={duplicateFormData.adsetName}
+                  onChange={(e) => setDuplicateFormData({ ...duplicateFormData, adsetName: e.target.value })}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  placeholder="Enter adset name"
+                  required
+                />
+              </div>
+
+              {/* Source Adset Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Copy Settings From <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={duplicateFormData.sourceAdsetId}
+                  onChange={(e) => setDuplicateFormData({ ...duplicateFormData, sourceAdsetId: e.target.value })}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                  disabled={!duplicateFormData.campaignId}
+                >
+                  <option value="">
+                    {duplicateFormData.campaignId 
+                      ? 'Select an adset to copy settings from' 
+                      : 'Select a campaign first'}
+                  </option>
+                  {allAdsets
+                    ?.filter((adset) => 
+                      duplicateFormData.campaignId 
+                        ? adset.campaignId?._id === duplicateFormData.campaignId
+                        : true
+                    )
+                    .map((adset) => (
+                      <option key={adset._id} value={adset._id}>
+                        {adset.name} {adset.campaignId && `(${adset.campaignId.name})`}
+                      </option>
+                    ))}
+                </select>
+                <p className="mt-1 text-sm text-gray-500">
+                  {duplicateFormData.campaignId 
+                    ? 'Select an adset from the selected campaign to copy its settings.'
+                    : 'Different campaigns may have different adset settings. Select a campaign first, then choose an adset whose settings you want to copy.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-6 border-t bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowDuplicateModal(false);
+                  setSelectedAdsetForDuplicate(null);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDuplicateSubmit}
+                disabled={duplicatingId !== null || !duplicateFormData.campaignId || !duplicateFormData.adsetName || !duplicateFormData.sourceAdsetId}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {duplicatingId ? 'Duplicating...' : 'Duplicate Adset'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

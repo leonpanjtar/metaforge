@@ -312,7 +312,7 @@ export class FacebookApiService {
             'daily_budget',
             'lifetime_budget',
             'budget_remaining',
-            'targeting',
+            'targeting{custom_audiences,age_min,age_max,genders,geo_locations,interests,behaviors,publisher_platforms,flexible_spec}', // Include custom_audiences and flexible_spec
             'optimization_goal',
             'billing_event',
             'bid_strategy',

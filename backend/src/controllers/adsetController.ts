@@ -170,11 +170,11 @@ export const syncAdsetFromFacebook = async (req: AuthRequest, res: Response): Pr
       return;
     }
 
-    const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
+    const FacebookCacheServiceModule = await import('../services/facebook/FacebookCacheService');
     const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
     
     await TokenRefreshService.checkAndRefreshToken(facebookAccount);
-    const apiService = new FacebookApiService(facebookAccount.accessToken);
+    const apiService = new FacebookCacheServiceModule.FacebookCacheService(facebookAccount.accessToken);
     const facebookDetails = await apiService.getAdsetDetails(adset.facebookAdsetId);
 
     // Update adset with Facebook data
@@ -193,7 +193,7 @@ export const syncAdsetFromFacebook = async (req: AuthRequest, res: Response): Pr
     adset.startTime = facebookDetails.start_time;
     adset.endTime = facebookDetails.end_time;
 
-    // Update targeting if available
+    // Update targeting if available - preserve all fields including custom audiences
     if (facebookDetails.targeting) {
       if (facebookDetails.targeting.age_min) adset.targeting.ageMin = facebookDetails.targeting.age_min;
       if (facebookDetails.targeting.age_max) adset.targeting.ageMax = facebookDetails.targeting.age_max;
@@ -204,9 +204,27 @@ export const syncAdsetFromFacebook = async (req: AuthRequest, res: Response): Pr
       if (facebookDetails.targeting.interests) {
         adset.targeting.interests = facebookDetails.targeting.interests.map((i: any) => i.name || i.id);
       }
+      // Preserve custom audiences / saved audiences
+      if (facebookDetails.targeting.custom_audiences) {
+        (adset.targeting as any).customAudiences = JSON.parse(JSON.stringify(facebookDetails.targeting.custom_audiences));
+      }
+      // Preserve any other targeting fields
+      Object.keys(facebookDetails.targeting).forEach((key) => {
+        if (!['age_min', 'age_max', 'genders', 'geo_locations', 'interests'].includes(key)) {
+          if (key === 'custom_audiences') {
+            (adset.targeting as any).customAudiences = JSON.parse(JSON.stringify(facebookDetails.targeting[key]));
+          } else {
+            (adset.targeting as any)[key] = facebookDetails.targeting[key];
+          }
+        }
+      });
     }
 
     await adset.save();
+
+    // Invalidate adset details cache after sync
+    apiService.invalidate(`adsetDetails:${adset.facebookAdsetId}`);
+    apiService.invalidate('adsets:');
 
     res.json(adset);
   } catch (error: any) {
@@ -381,11 +399,11 @@ export const copyAdsetSettings = async (req: AuthRequest, res: Response): Promis
         );
         
         if (facebookAccount) {
-          const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
+          const FacebookCacheServiceModule = await import('../services/facebook/FacebookCacheService');
           const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
           
           await TokenRefreshService.checkAndRefreshToken(facebookAccount);
-          const apiService = new FacebookApiService(facebookAccount.accessToken);
+          const apiService = new FacebookCacheServiceModule.FacebookCacheService(facebookAccount.accessToken);
           facebookDetails = await apiService.getAdsetDetails(sourceAdset.facebookAdsetId);
         }
       } catch (error: any) {
@@ -393,8 +411,8 @@ export const copyAdsetSettings = async (req: AuthRequest, res: Response): Promis
       }
     }
 
-    // Copy all settings to target adset
-    targetAdset.targeting = {
+    // Copy all settings to target adset - preserve all targeting fields including custom audiences
+    const targetingCopy: any = {
       ageMin: facebookDetails?.targeting?.age_min || sourceAdset.targeting.ageMin,
       ageMax: facebookDetails?.targeting?.age_max || sourceAdset.targeting.ageMax,
       genders: facebookDetails?.targeting?.genders || sourceAdset.targeting.genders || [],
@@ -406,6 +424,24 @@ export const copyAdsetSettings = async (req: AuthRequest, res: Response): Promis
       detailedTargeting: sourceAdset.targeting.detailedTargeting || [],
       placements: sourceAdset.targeting.placements || [],
     };
+
+    // Copy custom audiences / saved audiences if present
+    if (facebookDetails?.targeting?.custom_audiences) {
+      targetingCopy.customAudiences = JSON.parse(JSON.stringify(facebookDetails.targeting.custom_audiences));
+    } else if (sourceAdset.targeting.customAudiences) {
+      targetingCopy.customAudiences = JSON.parse(JSON.stringify(sourceAdset.targeting.customAudiences));
+    }
+
+    // Copy any other targeting fields that might exist
+    if (sourceAdset.targeting) {
+      Object.keys(sourceAdset.targeting).forEach((key) => {
+        if (!targetingCopy.hasOwnProperty(key)) {
+          targetingCopy[key] = (sourceAdset.targeting as any)[key];
+        }
+      });
+    }
+
+    targetAdset.targeting = targetingCopy;
     
     targetAdset.budget = facebookDetails?.daily_budget 
       ? facebookDetails.daily_budget / 100 
@@ -585,11 +621,11 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
         );
         
         if (facebookAccount) {
-          const { FacebookApiService } = await import('../services/facebook/FacebookApiService');
+          const FacebookCacheServiceModule = await import('../services/facebook/FacebookCacheService');
           const { TokenRefreshService } = await import('../services/facebook/TokenRefreshService');
           
           await TokenRefreshService.checkAndRefreshToken(facebookAccount);
-          const apiService = new FacebookApiService(facebookAccount.accessToken);
+          const apiService = new FacebookCacheServiceModule.FacebookCacheService(facebookAccount.accessToken);
           facebookDetails = await apiService.getAdsetDetails(sourceAdset.facebookAdsetId);
         }
       } catch (error: any) {
@@ -599,24 +635,42 @@ export const duplicateAdset = async (req: AuthRequest, res: Response): Promise<v
     }
 
     // Create duplicate adset with ALL settings - deep copy everything
+    // Deep copy targeting - preserve all fields including custom audiences
+    const targetingCopy: any = {
+      ageMin: facebookDetails?.targeting?.age_min || sourceAdset.targeting.ageMin,
+      ageMax: facebookDetails?.targeting?.age_max || sourceAdset.targeting.ageMax,
+      genders: facebookDetails?.targeting?.genders || sourceAdset.targeting.genders || [],
+      locations: facebookDetails?.targeting?.geo_locations?.countries || sourceAdset.targeting.locations || [],
+      interests: facebookDetails?.targeting?.interests 
+        ? facebookDetails.targeting.interests.map((i: any) => i.name || i.id)
+        : sourceAdset.targeting.interests || [],
+      behaviors: sourceAdset.targeting.behaviors || [],
+      detailedTargeting: sourceAdset.targeting.detailedTargeting || [],
+      placements: sourceAdset.targeting.placements || [],
+    };
+
+    // Copy custom audiences / saved audiences if present
+    if (facebookDetails?.targeting?.custom_audiences) {
+      targetingCopy.customAudiences = JSON.parse(JSON.stringify(facebookDetails.targeting.custom_audiences));
+    } else if (sourceAdset.targeting.customAudiences) {
+      targetingCopy.customAudiences = JSON.parse(JSON.stringify(sourceAdset.targeting.customAudiences));
+    }
+
+    // Copy any other targeting fields that might exist (flexible schema)
+    if (sourceAdset.targeting) {
+      Object.keys(sourceAdset.targeting).forEach((key) => {
+        if (!targetingCopy.hasOwnProperty(key)) {
+          targetingCopy[key] = (sourceAdset.targeting as any)[key];
+        }
+      });
+    }
+
     const duplicatedAdset = new Adset({
       userId: req.userId,
       accountId: accountFilter.accountId,
       campaignId: targetCampaignId,
       name: newName,
-      // Deep copy targeting
-      targeting: {
-        ageMin: facebookDetails?.targeting?.age_min || sourceAdset.targeting.ageMin,
-        ageMax: facebookDetails?.targeting?.age_max || sourceAdset.targeting.ageMax,
-        genders: facebookDetails?.targeting?.genders || sourceAdset.targeting.genders || [],
-        locations: facebookDetails?.targeting?.geo_locations?.countries || sourceAdset.targeting.locations || [],
-        interests: facebookDetails?.targeting?.interests 
-          ? facebookDetails.targeting.interests.map((i: any) => i.name || i.id)
-          : sourceAdset.targeting.interests || [],
-        behaviors: sourceAdset.targeting.behaviors || [],
-        detailedTargeting: sourceAdset.targeting.detailedTargeting || [],
-        placements: sourceAdset.targeting.placements || [],
-      },
+      targeting: targetingCopy,
       budget: facebookDetails?.daily_budget 
         ? facebookDetails.daily_budget / 100 
         : sourceAdset.budget,

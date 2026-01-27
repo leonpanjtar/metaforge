@@ -498,7 +498,8 @@ export const previewCombination = async (
     }
 
     // Get Facebook page
-    const facebookApi = new FacebookApiService(updatedAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const facebookApi = new FacebookCacheService(updatedAccount.accessToken);
     const pages = await facebookApi.getPages();
     
     if (!pages || pages.length === 0) {

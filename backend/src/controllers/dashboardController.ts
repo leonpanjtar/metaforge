@@ -216,7 +216,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         // Check and refresh token
         await TokenRefreshService.checkAndRefreshToken(facebookAccount);
         
-        const apiService = new FacebookApiService(facebookAccount.accessToken);
+        const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+        const apiService = new FacebookCacheService(facebookAccount.accessToken);
         const accountIdWithPrefix = facebookAccount.accountId.startsWith('act_')
           ? facebookAccount.accountId
           : `act_${facebookAccount.accountId}`;

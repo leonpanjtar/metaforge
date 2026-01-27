@@ -57,7 +57,8 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
-    const apiService = new FacebookApiService(updatedAccount.accessToken);
+    const { FacebookCacheService } = await import('../services/facebook/FacebookCacheService');
+    const apiService = new FacebookCacheService(updatedAccount.accessToken);
     const accountIdWithPrefix = updatedAccount.accountId.startsWith('act_')
       ? updatedAccount.accountId
       : `act_${updatedAccount.accountId}`;
@@ -133,6 +134,22 @@ export const deployAds = async (req: AuthRequest, res: Response): Promise<void> 
             ? adset.targeting.placements
             : ['facebook', 'instagram'];
           targeting.publisher_platforms = placements;
+
+          // Include custom audiences / saved audiences if present
+          if ((adset.targeting as any).customAudiences && (adset.targeting as any).customAudiences.length > 0) {
+            targeting.custom_audiences = (adset.targeting as any).customAudiences;
+          }
+
+          // Include any other targeting fields that might exist (flexible schema)
+          Object.keys(adset.targeting).forEach((key) => {
+            if (!['ageMin', 'ageMax', 'genders', 'locations', 'interests', 'behaviors', 'placements', 'detailedTargeting', 'customAudiences'].includes(key)) {
+              // Map camelCase to snake_case for Facebook API
+              const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+              if (!targeting.hasOwnProperty(snakeKey)) {
+                targeting[snakeKey] = (adset.targeting as any)[key];
+              }
+            }
+          });
 
           const adsetData: any = {
             name: adset.name,

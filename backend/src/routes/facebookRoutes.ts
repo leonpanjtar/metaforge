@@ -4,6 +4,7 @@ import {
   handleCallback,
   getAccounts,
   getCampaigns,
+  syncCampaigns,
   disconnectAccount,
   importFacebookAdsets,
   getPagesForCampaign,
@@ -22,6 +23,7 @@ router.get('/accounts/selection', authenticate, getAccountsForSelection);
 router.get('/active', authenticate, getActiveAccount);
 router.post('/active', authenticate, setActiveAccount);
 router.get('/campaigns/:accountId', authenticate, getCampaigns);
+router.post('/campaigns/:accountId/sync', authenticate, syncCampaigns);
 router.post('/campaigns/:campaignId/import-adsets', authenticate, importFacebookAdsets);
 router.get('/pages/:campaignId', authenticate, getPagesForCampaign);
 router.post('/disconnect/:accountId', authenticate, disconnectAccount);
