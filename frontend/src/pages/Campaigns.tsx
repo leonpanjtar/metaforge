@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
 import FacebookConnector from '../components/FacebookConnector';
@@ -20,6 +20,7 @@ interface Campaign {
 
 const Campaigns = () => {
   const { currentAccount } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [reconnectLoading, setReconnectLoading] = useState(false);
@@ -183,7 +184,11 @@ const Campaigns = () => {
                   {campaigns
                     .filter((campaign) => statusFilter === 'ALL' || campaign.status === statusFilter)
                     .map((campaign) => (
-                    <tr key={campaign._id}>
+                    <tr 
+                      key={campaign._id}
+                      className="cursor-pointer hover:bg-gray-50 transition-colors"
+                      onClick={() => navigate(`/adsets/${campaign._id}`)}
+                    >
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {campaign.name}
                       </td>
@@ -201,7 +206,7 @@ const Campaigns = () => {
                           {campaign.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" onClick={(e) => e.stopPropagation()}>
                         <Link
                           to={`/adsets/${campaign._id}`}
                           className="text-blue-600 hover:text-blue-900"
@@ -210,7 +215,7 @@ const Campaigns = () => {
                         </Link>
                         <Link
                           to={`/adsets/create?campaignId=${campaign._id}`}
-                          className="text-green-600 hover:text-green-900"
+                          className="ml-4 text-green-600 hover:text-green-900"
                         >
                           Create Adset
                         </Link>

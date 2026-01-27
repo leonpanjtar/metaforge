@@ -867,6 +867,7 @@ export const createAdsetFromWinningAd = async (req: AuthRequest, res: Response):
       contentData: {
         landingPageUrl: link || '',
       },
+      createdByApp: true, // Mark as created by the app
     });
     await newAdset.save();
 

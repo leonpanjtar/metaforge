@@ -74,16 +74,15 @@ export const generateCombinations = async (
       res.status(400).json({ error: 'Please select at least one body.' });
       return;
     }
-    if (finalSelectedDescriptions.length === 0) {
-      res.status(400).json({ error: 'Please select at least one description.' });
-      return;
-    }
+    // Descriptions are optional - no validation needed
 
     // Fetch only the selected components
     const assets = await Asset.find({ _id: { $in: finalSelectedAssets }, adsetId });
     const headlines = await AdCopy.find({ _id: { $in: finalSelectedHeadlines }, adsetId, type: 'headline' });
     const bodies = await AdCopy.find({ _id: { $in: finalSelectedBodies }, adsetId, type: 'body' });
-    const descriptions = await AdCopy.find({ _id: { $in: finalSelectedDescriptions }, adsetId, type: 'description' });
+    const descriptions = finalSelectedDescriptions.length > 0 
+      ? await AdCopy.find({ _id: { $in: finalSelectedDescriptions }, adsetId, type: 'description' })
+      : [];
 
     // Validate that fetched components match selected IDs (in case some IDs are invalid)
     if (assets.length !== finalSelectedAssets.length) {
@@ -98,7 +97,8 @@ export const generateCombinations = async (
       res.status(400).json({ error: 'Some selected bodies were not found.' });
       return;
     }
-    if (descriptions.length !== finalSelectedDescriptions.length) {
+    // Only validate descriptions if any were selected
+    if (finalSelectedDescriptions.length > 0 && descriptions.length !== finalSelectedDescriptions.length) {
       res.status(400).json({ error: 'Some selected descriptions were not found.' });
       return;
     }
@@ -121,8 +121,36 @@ export const generateCombinations = async (
     for (const asset of assets) {
       for (const headline of headlines) {
         for (const body of bodies) {
-          for (const description of descriptions) {
-            // For each CTA button type, create a combination
+          // If descriptions are selected, use them; otherwise create combinations without descriptions
+          if (descriptions.length > 0) {
+            for (const description of descriptions) {
+              // For each CTA button type, create a combination
+              for (const ctaType of ctaTypes) {
+                // Create combination with default scores (scoring can be done later)
+                const combination = new AdCombination({
+                  adsetId,
+                  assetIds: [asset._id],
+                  headlineId: headline._id,
+                  bodyId: body._id,
+                  descriptionId: description._id,
+                  ctaType: ctaType,
+                  url: landingPageUrl,
+                  scores: {
+                    alignment: 0,
+                    fit: 0,
+                    clarity: 0,
+                    match: 0,
+                  },
+                  overallScore: 0,
+                  predictedCTR: 0,
+                  deployedToFacebook: false,
+                });
+
+                combinationDocs.push(combination);
+              }
+            }
+          } else {
+            // No descriptions selected - create combinations without descriptions
             for (const ctaType of ctaTypes) {
               // Create combination with default scores (scoring can be done later)
               const combination = new AdCombination({
@@ -130,7 +158,7 @@ export const generateCombinations = async (
                 assetIds: [asset._id],
                 headlineId: headline._id,
                 bodyId: body._id,
-                descriptionId: description._id,
+                descriptionId: undefined, // No description
                 ctaType: ctaType,
                 url: landingPageUrl,
                 scores: {

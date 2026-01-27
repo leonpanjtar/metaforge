@@ -3,6 +3,10 @@ import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import { Adset } from '../models/Adset';
 import { Campaign } from '../models/Campaign';
+import { Asset } from '../models/Asset';
+import { AdCopy } from '../models/AdCopy';
+import { AdCombination } from '../models/AdCombination';
+import { FileStorageService } from '../services/storage/FileStorageService';
 import { getAccountFilter, getAccountUserIds } from '../utils/accountFilter';
 
 export const createAdset = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -464,17 +468,63 @@ export const deleteAdset = async (req: AuthRequest, res: Response): Promise<void
       adsetQuery.userId = { $in: accountUserObjectIds };
     }
 
-    const adset = await Adset.findOneAndDelete(adsetQuery);
+    // Find the adset first to check conditions
+    const adset = await Adset.findOne(adsetQuery);
 
     if (!adset) {
       res.status(404).json({ error: 'Adset not found' });
       return;
     }
 
-    res.json({ success: true });
+    // Only allow deletion if not published to Facebook
+    // Consider adsets without facebookAdsetId as app-created (not synced/live on FB)
+    if (adset.facebookAdsetId) {
+      res.status(403).json({ error: 'Cannot delete adsets that have been published to Facebook' });
+      return;
+    }
+
+    // Count items before deletion for response
+    const assetsCount = await Asset.countDocuments({ adsetId: id });
+    const copiesCount = await AdCopy.countDocuments({ adsetId: id });
+    const combinationsCount = await AdCombination.countDocuments({ adsetId: id });
+
+    // Delete all assets associated with this adset
+    const assets = await Asset.find({ adsetId: id });
+    const fileStorageService = new FileStorageService();
+    
+    for (const asset of assets) {
+      try {
+        // Delete the asset file from filesystem
+        await fileStorageService.deleteFile(asset.filepath);
+      } catch (error: any) {
+        console.warn(`Failed to delete asset file ${asset.filepath}:`, error.message);
+        // Continue even if file deletion fails
+      }
+    }
+    
+    // Delete all assets from database
+    await Asset.deleteMany({ adsetId: id });
+
+    // Delete all ad copies associated with this adset
+    await AdCopy.deleteMany({ adsetId: id });
+
+    // Delete all combinations associated with this adset
+    await AdCombination.deleteMany({ adsetId: id });
+
+    // Finally, delete the adset itself
+    await Adset.findByIdAndDelete(id);
+
+    res.json({ 
+      success: true,
+      deleted: {
+        assets: assetsCount,
+        copies: copiesCount,
+        combinations: combinationsCount,
+      }
+    });
   } catch (error: any) {
     console.error('Delete adset error:', error);
-    res.status(500).json({ error: 'Failed to delete adset' });
+    res.status(500).json({ error: error.message || 'Failed to delete adset' });
   }
 };
 

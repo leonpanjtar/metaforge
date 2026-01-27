@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
+import { HiTrash, HiDuplicate, HiTemplate, HiRefresh, HiPencil } from 'react-icons/hi';
 
 interface Adset {
   _id: string;
@@ -31,8 +32,9 @@ const Adsets = () => {
   const queryClient = useQueryClient();
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data: adsets, refetch } = useQuery<Adset[]>({
+  const { data: adsets } = useQuery<Adset[]>({
     queryKey: ['adsets', campaignId],
     queryFn: async () => {
       const response = await api.get(`/adsets?campaignId=${campaignId || ''}`);
@@ -100,6 +102,38 @@ const Adsets = () => {
     }
     setSyncingId(adset._id);
     await syncMutation.mutateAsync(adset._id);
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: async (adsetId: string) => {
+      const response = await api.delete(`/adsets/${adsetId}`);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['adsets', campaignId] });
+      setDeletingId(null);
+      const deletedInfo = data.deleted ? 
+        ` Deleted ${data.deleted.assets || 0} assets, ${data.deleted.copies || 0} copies, and ${data.deleted.combinations || 0} combinations.` : '';
+      alert(`Adset deleted successfully!${deletedInfo}`);
+    },
+    onError: (error: any) => {
+      setDeletingId(null);
+      alert(error.response?.data?.error || 'Failed to delete adset');
+    },
+  });
+
+  const handleDelete = async (adset: Adset) => {
+    if (adset.facebookAdsetId) {
+      alert('Cannot delete adsets that have been published to Facebook.');
+      return;
+    }
+    
+    if (!window.confirm(`Are you sure you want to delete "${adset.name}"?\n\nThis will permanently delete:\n- The adset\n- All associated assets and images\n- All ad copies\n- All combinations\n\nThis action cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingId(adset._id);
+    await deleteMutation.mutateAsync(adset._id);
   };
 
   const importMutation = useMutation({
@@ -180,7 +214,11 @@ const Adsets = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {adsets.map((adset) => (
-                <tr key={adset._id} className={adset.createdByApp ? 'bg-blue-50' : ''}>
+                <tr 
+                  key={adset._id} 
+                  className={`cursor-pointer hover:bg-gray-50 transition-colors ${adset.createdByApp ? 'bg-blue-50' : ''}`}
+                  onClick={() => navigate(`/adsets/edit/${adset._id}`)}
+                >
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     <div className="flex items-center gap-2">
                       {adset.name}
@@ -228,38 +266,64 @@ const Adsets = () => {
                       </div>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button
-                      onClick={() => handleDuplicate(adset)}
-                      disabled={duplicatingId === adset._id}
-                      className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
-                      title="Clone with ALL settings (targeting, conversion goals, optimization, billing, etc.)"
-                    >
-                      {duplicatingId === adset._id ? 'Copying...' : 'Copy'}
-                    </button>
-                    <button
-                      onClick={() => handleUseAsTemplate(adset)}
-                      className="text-green-600 hover:text-green-900"
-                      title="Use as template to create new adset with pre-filled settings"
-                    >
-                      Template
-                    </button>
-                    {adset.facebookAdsetId && (
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
-                        onClick={() => handleSync(adset)}
-                        disabled={syncingId === adset._id}
-                        className="text-purple-600 hover:text-purple-900 disabled:opacity-50"
-                        title="Sync latest settings from Facebook"
+                        onClick={() => handleDuplicate(adset)}
+                        disabled={duplicatingId === adset._id}
+                        className="p-2 text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
+                        title="Clone with ALL settings (targeting, conversion goals, optimization, billing, etc.)"
                       >
-                        {syncingId === adset._id ? 'Syncing...' : 'Sync'}
+                        {duplicatingId === adset._id ? (
+                          <span className="text-xs">...</span>
+                        ) : (
+                          <HiDuplicate className="w-5 h-5" />
+                        )}
                       </button>
-                    )}
-                    <Link
-                      to={`/adsets/edit/${adset._id}`}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      Edit
-                    </Link>
+                      <button
+                        onClick={() => handleUseAsTemplate(adset)}
+                        className="p-2 text-green-600 hover:text-green-900 hover:bg-green-50 rounded transition-colors"
+                        title="Use as template to create new adset with pre-filled settings"
+                      >
+                        <HiTemplate className="w-5 h-5" />
+                      </button>
+                      {adset.facebookAdsetId && (
+                        <button
+                          onClick={() => handleSync(adset)}
+                          disabled={syncingId === adset._id}
+                          className="p-2 text-purple-600 hover:text-purple-900 hover:bg-purple-50 rounded transition-colors disabled:opacity-50"
+                          title="Sync latest settings from Facebook"
+                        >
+                          {syncingId === adset._id ? (
+                            <span className="text-xs">...</span>
+                          ) : (
+                            <HiRefresh className="w-5 h-5" />
+                          )}
+                        </button>
+                      )}
+                      <Link
+                        to={`/adsets/edit/${adset._id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded transition-colors"
+                        title="Edit adset"
+                      >
+                        <HiPencil className="w-5 h-5" />
+                      </Link>
+                      {!adset.facebookAdsetId && (
+                        <button
+                          onClick={() => handleDelete(adset)}
+                          disabled={deletingId === adset._id}
+                          className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                          title="Delete adset and all associated assets, copies, and combinations"
+                        >
+                          {deletingId === adset._id ? (
+                            <span className="text-xs">...</span>
+                          ) : (
+                            <HiTrash className="w-5 h-5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

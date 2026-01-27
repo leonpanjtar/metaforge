@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import FileUpload from '../components/FileUpload';
-import { HiTrash, HiPlus, HiX, HiSparkles, HiSelector, HiBan, HiCursorClick } from 'react-icons/hi';
+import { HiTrash, HiPlus, HiX, HiSparkles, HiSelector, HiBan, HiCursorClick, HiDuplicate } from 'react-icons/hi';
 
 interface Adset {
   _id: string;
@@ -247,6 +247,15 @@ const AdsetEditor = () => {
   
   // Asset preview state
   const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+  
+  // Tooltip preview state
+  const [tooltipPreview, setTooltipPreview] = useState<{
+    type: 'image' | 'body';
+    content: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [tooltipTimeout, setTooltipTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch adset
   const { data: adset } = useQuery<Adset>({
@@ -459,6 +468,23 @@ const AdsetEditor = () => {
       [field]: true,
     }));
     await generateContentDataMutation.mutateAsync({ field });
+  };
+
+  const handleDuplicateCopy = async (copy: any) => {
+    try {
+      await api.post(`/ad-copies`, {
+        adsetId: adsetId,
+        type: copy.type,
+        content: copy.content,
+        variantIndex: undefined, // Let backend auto-calculate
+        generatedByAI: false, // Duplicated copies are manual
+      });
+      
+      // Refresh copies list
+      queryClient.invalidateQueries({ queryKey: ['ad-copies', adsetId] });
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to duplicate copy');
+    }
   };
 
   // Track edited copy content
@@ -1861,6 +1887,14 @@ const AdsetEditor = () => {
                                       </span>
                                     )}
                                     <button
+                                      onClick={() => handleDuplicateCopy(copy)}
+                                      className="opacity-0 group-hover:opacity-100 text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-opacity flex items-center justify-center"
+                                      title="Duplicate copy"
+                                      aria-label="Duplicate copy"
+                                    >
+                                      <HiDuplicate className="w-4 h-4" />
+                                    </button>
+                                    <button
                                       onClick={() => handleGenerateVariant(copy)}
                                       disabled={generateVariantMutation.isPending || generatingVariantFor === copy._id}
                                       className="opacity-0 group-hover:opacity-100 text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded transition-opacity flex items-center justify-center"
@@ -2121,37 +2155,64 @@ const AdsetEditor = () => {
                     Choose which components to use when generating ad combinations. Leave all unchecked to use all available components.
                   </p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* Row 1: Assets and Bodies */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     {/* Assets */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Assets ({assets?.length || 0})
                       </label>
-                      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <div className="border rounded-lg p-3">
                         {assets && assets.length > 0 ? (
-                          assets.map((asset) => (
-                            <label key={asset._id} className="flex items-center gap-2 py-1 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedComponents.assets.includes(asset._id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedComponents(prev => ({
-                                      ...prev,
-                                      assets: [...prev.assets, asset._id]
-                                    }));
-                                  } else {
-                                    setSelectedComponents(prev => ({
-                                      ...prev,
-                                      assets: prev.assets.filter(id => id !== asset._id)
-                                    }));
-                                  }
-                                }}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span className="truncate">{asset.filename}</span>
-                            </label>
-                          ))
+                          <div className="grid grid-cols-6 gap-2">
+                            {assets.map((asset) => {
+                              const isSelected = selectedComponents.assets.includes(asset._id);
+                              const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+                              return (
+                                <div
+                                  key={asset._id}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setSelectedComponents(prev => ({
+                                        ...prev,
+                                        assets: prev.assets.filter(id => id !== asset._id)
+                                      }));
+                                    } else {
+                                      setSelectedComponents(prev => ({
+                                        ...prev,
+                                        assets: [...prev.assets, asset._id]
+                                      }));
+                                    }
+                                  }}
+                                  className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                                    isSelected 
+                                      ? 'border-blue-500 ring-2 ring-blue-200' 
+                                      : 'border-gray-200 hover:border-gray-300'
+                                  }`}
+                                  title={asset.filename}
+                                >
+                                  {asset.type === 'image' ? (
+                                    <img
+                                      src={`${API_URL}${asset.url}`}
+                                      alt={asset.filename}
+                                      className="w-full h-16 object-cover"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-16 bg-gray-200 flex items-center justify-center">
+                                      <span className="text-xs text-gray-500">Video</span>
+                                    </div>
+                                  )}
+                                  {isSelected && (
+                                    <div className="absolute top-1 right-1 bg-blue-500 rounded-full p-1">
+                                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         ) : (
                           <p className="text-xs text-gray-500">No assets available</p>
                         )}
@@ -2193,7 +2254,10 @@ const AdsetEditor = () => {
                         )}
                       </div>
                     </div>
+                  </div>
 
+                  {/* Row 2: Headlines, Descriptions, and CTA */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Headlines */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2233,7 +2297,7 @@ const AdsetEditor = () => {
                     {/* Descriptions */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Descriptions ({copies?.filter(c => c.type === 'description').length || 0})
+                        Descriptions (Optional) ({copies?.filter(c => c.type === 'description').length || 0})
                       </label>
                       <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
                         {copies && copies.filter(c => c.type === 'description').length > 0 ? (
@@ -2479,12 +2543,35 @@ const AdsetEditor = () => {
 
                           {/* Creative Preview */}
                           {asset && (
-                            <div className="mb-3">
+                            <div 
+                              className="mb-3 relative"
+                              onMouseEnter={(e) => {
+                                if (asset.type === 'image') {
+                                  const timeout = setTimeout(() => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setTooltipPreview({
+                                      type: 'image',
+                                      content: `${API_URL}${asset.url}`,
+                                      x: rect.left + rect.width / 2,
+                                      y: rect.top,
+                                    });
+                                  }, 500); // Show after 500ms hover
+                                  setTooltipTimeout(timeout);
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if (tooltipTimeout) {
+                                  clearTimeout(tooltipTimeout);
+                                  setTooltipTimeout(null);
+                                }
+                                setTooltipPreview(null);
+                              }}
+                            >
                               {asset.type === 'image' ? (
                                 <img
                                   src={`${API_URL}${asset.url}`}
                                   alt="Creative"
-                                  className="w-full h-32 object-cover rounded-lg border border-gray-200"
+                                  className="w-full h-32 object-cover rounded-lg border border-gray-200 cursor-pointer"
                                 />
                               ) : (
                                 <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center border border-gray-200">
@@ -2499,9 +2586,32 @@ const AdsetEditor = () => {
                               <span className="font-medium text-gray-700">Headline:</span>
                               <p className="text-gray-900 mt-1">{combination.headlineId?.content || 'N/A'}</p>
                             </div>
-                            <div>
+                            <div
+                              onMouseEnter={(e) => {
+                                if (adBody) {
+                                  const timeout = setTimeout(() => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setTooltipPreview({
+                                      type: 'body',
+                                      content: adBody,
+                                      x: rect.left + rect.width / 2,
+                                      y: rect.top,
+                                    });
+                                  }, 500); // Show after 500ms hover
+                                  setTooltipTimeout(timeout);
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if (tooltipTimeout) {
+                                  clearTimeout(tooltipTimeout);
+                                  setTooltipTimeout(null);
+                                }
+                                setTooltipPreview(null);
+                              }}
+                              className="relative"
+                            >
                               <span className="font-medium text-gray-700">Body:</span>
-                              <p className="text-gray-900 mt-1 whitespace-pre-wrap line-clamp-3">{adBody || 'N/A'}</p>
+                              <p className="text-gray-900 mt-1 whitespace-pre-wrap line-clamp-3 cursor-pointer">{adBody || 'N/A'}</p>
                             </div>
                             <div>
                               <span className="font-medium text-gray-700">Description:</span>
@@ -3051,6 +3161,33 @@ const AdsetEditor = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tooltip Preview */}
+      {tooltipPreview && (
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: `${tooltipPreview.x}px`,
+            top: `${tooltipPreview.y}px`,
+            transform: 'translate(-50%, -100%)',
+            marginTop: '-10px',
+          }}
+        >
+          <div className="bg-white rounded-lg shadow-2xl border-2 border-gray-300 p-2 max-w-md">
+            {tooltipPreview.type === 'image' ? (
+              <img
+                src={tooltipPreview.content}
+                alt="Preview"
+                className="max-w-xs max-h-96 object-contain rounded"
+              />
+            ) : (
+              <div className="max-w-xs max-h-96 overflow-auto">
+                <p className="text-sm text-gray-900 whitespace-pre-wrap p-2">{tooltipPreview.content}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
